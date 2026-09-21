@@ -68,8 +68,10 @@ def run(src,name='<memory>'):
 
 def main():
     ap=argparse.ArgumentParser(prog='niko2',description='Niko 2 compiler/interpreter')
-    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','deps','lock','lsp','debug'])
+    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','deps','lock','lsp','debug','wasm'])
     ap.add_argument('file',nargs='?')
+    ap.add_argument('-o','--output',help='output .wasm file (default: <file>.wasm)')
+    ap.add_argument('--run',action='store_true',help='run the .wasm with node after building')
     ap.add_argument('--version',action='version',version=f'Niko {VERSION}')
     a=ap.parse_args()
     if a.command=='lsp':
@@ -117,7 +119,33 @@ def main():
         print(f'✓ wrote {lock_path}')
         return 0
     if not a.file:
-        print('Usage: niko2 run <file.niko|.nikoir> | niko2 check <file.niko> | niko2 format <file.niko> | niko2 deps [folder] | niko2 lock [folder] | niko2 init <folder> | niko2 lsp | niko2 debug'); return 2
+        print('Usage: niko2 run <file.niko|.nikoir> | niko2 check <file.niko> | niko2 format <file.niko> | niko2 deps [folder] | niko2 lock [folder] | niko2 init <folder> | niko2 lsp | niko2 debug | niko2 wasm <file.niko> [-o out.wasm] [--run]'); return 2
+
+    # Alpha 8: compile to WebAssembly.
+    if a.command=='wasm':
+        import shutil, subprocess
+        from .backends.wasm import WasmBackend, CompileError as WasmCompileError
+        try: src=Path(a.file).read_text(encoding='utf8')
+        except OSError as e: print(f'Niko error: {e}'); return 1
+        try:
+            tree=compile_source(src,a.file)
+            wasm_bytes=WasmBackend().compile(tree)
+        except ParseError as e:
+            print(format_parse_error(src, e, a.file)); return 1
+        except (TypeErrorNiko,CompileError,NikoRuntimeError,WasmCompileError) as e:
+            print(format_diagnostic(src, e, a.file)); return 1
+        out=Path(a.output) if a.output else Path(a.file).with_suffix('.wasm')
+        try: out.write_bytes(wasm_bytes)
+        except OSError as e: print(f'Niko error: {e}'); return 1
+        print(f'✓ built {out} ({len(wasm_bytes)} bytes)', flush=True)
+        if a.run:
+            node=shutil.which('node')
+            if not node:
+                print('Niko error: --run needs node.js on PATH'); return 1
+            host=Path(__file__).parent/'backends'/'wasm_host.cjs'
+            r=subprocess.run([node,str(host),str(out)])
+            return r.returncode
+        return 0
 
     # Alpha 5: a .nikoir file is a pre-compiled artifact. It skips lexing,
     # parsing and type checking entirely -- `run` and `disasm` load the

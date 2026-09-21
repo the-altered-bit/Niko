@@ -153,3 +153,21 @@ it's formatting/diagnosing is closer to feature-complete.
 - Future debugger work: expression evaluation (`evaluate` request),
   conditional breakpoints, `use`-import support, and a friendlier
   `ask`-under-debugger story.
+
+## Alpha 8 WASM backend limits
+
+- **Numbers are f64.** All Niko numbers compile to 64-bit floats; very
+  large integers lose precision exactly the way the VM's floats do.
+- **`upper`/`lower` are ASCII-only.** Non-ASCII text passes through
+  unchanged.
+- **No `use` imports.** Multi-module programs can't compile to WASM yet.
+- **No file-I/O builtins** (`read_file`, `write_file`, `append_file`,
+  `read_lines`, `file_exists`, `try_read_file`). They raise `CompileError`.
+- **No method-call syntax** (`x.method(...)`); use the builtin form.
+- **No closures over enclosing function locals.** The VM captures them;
+  WASM raises `CompileError` — a real parity gap, not a silent mismatch.
+- **No first-class function values.** Functions are called by name only.
+- **`ask` needs a host.** Under node it reads stdin; other runtimes must
+  provide the `niko_input` import.
+- **`now()`/`today()`/`random_int` come from the host** environment.
+- Host shim: `niko2/backends/wasm_host.cjs` (node.js).
