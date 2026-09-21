@@ -1,4 +1,4 @@
-/* Niko native runtime — public API (Alpha 9).
+/* Niko native runtime — public API (Alpha 10).
  *
  * Every Niko value is a heap-allocated NVal*. The code generator in
  * native.py emits C that only ever touches NVal* through these functions,
@@ -19,7 +19,8 @@ enum {
     NVAL_YESNO   = 3,
     NVAL_LIST    = 4,
     NVAL_RECORD  = 5,
-    NVAL_RESULT  = 6
+    NVAL_RESULT  = 6,
+    NVAL_FUNCTION = 7   /* first-class function: {func_id, name, env} */
 };
 
 /* Binary/unary op codes (mirror the WASM backend). */
@@ -40,6 +41,9 @@ struct NVal {
         struct { char **keys; int32_t *klen;
                  NVal **vals; int32_t len, cap; } rec;
         struct { int32_t ok; NVal *val; } res;         /* error val is a text */
+        struct { int32_t func_id;                      /* niko_call_dispatch id */
+                 char *name; int32_t nlen;             /* simple source name */
+                 NVal *env; } fn;                      /* list of cell values */
     } u;
 };
 
@@ -56,9 +60,23 @@ NVal *nval_record(void);
 void  nval_record_set(NVal *r, const char *k, int32_t klen, NVal *v);
 NVal *nval_ok(NVal *v);
 NVal *nval_error(NVal *msg_text);          /* msg must be a text value */
+NVal *nval_function(int32_t id, const char *name, int32_t nlen, NVal *env);
+/* A cell is a 1-element list used as a shared mutable box for closures:
+ * captured variables are read with nval_cell_get and written with
+ * nval_cell_set, so every holder sees the same current value. */
+NVal *nval_cell(NVal *v);
+NVal *nval_cell_get(NVal *c);
+void  nval_cell_set(NVal *c, NVal *v);
 
 /* -- core ops (line = Niko source line, for panic messages) -------- */
 _Noreturn void niko_panic(int line, const char *msg);
+_Noreturn void niko_arity_panic(const char *name, int want, int got);
+/* Call a Niko function value: checks the tag (panics
+ * "I can't call <value> as a function." otherwise) and dispatches through
+ * niko_call_dispatch, which the generated program defines. */
+NVal *niko_call(int line, NVal *fn, int nargs, NVal **args);
+NVal *niko_call_dispatch(int line, int32_t func_id, NVal *env,
+                         int nargs, NVal **args);   /* generated code */
 int   nval_truthy(NVal *v);
 int   nval_equals(NVal *a, NVal *b);       /* Python-like: 1 == yes */
 NVal *nval_binary(int line, int op, NVal *a, NVal *b);

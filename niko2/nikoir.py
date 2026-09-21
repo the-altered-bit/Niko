@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from .ir import Instruction, FunctionCode, ModuleCode
 
-NIKOIR_FORMAT_VERSION = '1'  # bump if the on-disk shape changes
+NIKOIR_FORMAT_VERSION = '2'  # bump if the on-disk shape changes
 
 
 class NikoIRError(Exception):
@@ -33,10 +33,14 @@ def module_to_dict(module, engine_version='2.0.0-alpha.5'):
         'code': _code_to_json(module.code),
         'functions': {
             name: {
+                'name': fc.name,
                 'params': fc.params,
                 'return_type': fc.return_type,
                 'constants': fc.constants or [],
                 'code': _code_to_json(fc.code),
+                'qualname': fc.qualname,
+                'captures': list(fc.captures),
+                'nested': fc.nested,
             }
             for name, fc in module.functions.items()
         },
@@ -55,7 +59,7 @@ def module_from_dict(data):
         # Alpha 4 build output had no nikoir_format tag. Accept it as format "0"
         # so older artifacts still load; only refuse formats newer than we know.
         fmt = '0'
-    if fmt not in ('0', NIKOIR_FORMAT_VERSION):
+    if fmt not in ('0', '1', NIKOIR_FORMAT_VERSION):
         raise NikoIRError(
             f'This .nikoir file uses format {fmt!r}, which this build of niko2 '
             f'does not understand (it knows format {NIKOIR_FORMAT_VERSION!r}).'
@@ -64,11 +68,14 @@ def module_from_dict(data):
         functions = {}
         for name, fdata in data.get('functions', {}).items():
             functions[name] = FunctionCode(
-                name=name,
+                name=fdata.get('name', name),
                 params=fdata['params'],
                 code=_code_from_json(fdata['code']),
                 return_type=fdata.get('return_type'),
                 constants=fdata.get('constants') or [],
+                qualname=fdata.get('qualname', name),
+                captures=tuple(fdata.get('captures') or ()),
+                nested=bool(fdata.get('nested', False)),
             )
         return ModuleCode(
             code=_code_from_json(data['code']),

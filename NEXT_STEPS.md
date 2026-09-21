@@ -75,6 +75,12 @@ match cases in `tests/test_formatter.py`.
   Native extras over WASM: `ask` and the file-I/O builtins work.
   Limits: no `use` imports, no method calls, no first-class functions,
   no closures over enclosing function locals, needs `cc`/`gcc`/`clang`.
+- **Alpha 10 is complete**: closures + first-class functions on ALL backends
+  (VM, WASM, native) — nested `to` captures enclosing locals by reference,
+  functions are values, byte-identical output across backends. Tests:
+  `tests/niko2_cases/closures.niko`, `tests/test_closures.py` (3-way
+  differential), `tests/test_wasm.py`, `tests/test_native.py`. See
+  `RELEASE_NOTES_ALPHA10.md`.
 
 ## Standing cautions
 

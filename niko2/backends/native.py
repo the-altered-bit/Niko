@@ -1,9 +1,18 @@
-"""Niko native backend (Alpha 9): AST -> C -> native executable via cc.
+"""Niko native backend (Alpha 10): AST -> C -> native executable via cc.
 
 Mirrors the WASM backend's value model and semantics; the C runtime in
 niko_runtime.c implements the shared value/builtin behavior.
+
+Alpha 10: closures + first-class functions. Every Niko function compiles to
+one C function with the uniform signature
+``static NVal *niko_fn_<q>_<n>(NVal *env, int nargs, NVal **args)``.
+Function values are NVal tag 7 (``{func_id, name, env}``); every call site
+evaluates the callee to an NVal* and goes through ``niko_call``, which checks
+the tag and dispatches on func_id. Captured variables are shared boxes: a
+cell is a 1-element NVal list, read with ``nval_cell_get`` and written with
+``nval_cell_set``. Closure analysis (which names are captured / boxed) comes
+from the shared ``niko2/closures.py`` module.
 """
-import dataclasses
 import math
 import shutil
 import subprocess
@@ -19,6 +28,7 @@ from ..ast import (
     CallExpr, NameExpr, LiteralExpr, ListExpr, RecordExpr, IndexExpr,
     UnaryExpr, BinaryExpr, AttrExpr,
 )
+from ..closures import analyze_closures
 from ..compiler import CompileError
 from ..typecheck import BUILTIN_NAMES
 from . import Backend
@@ -123,25 +133,29 @@ def _ident(name):
     return ''.join(c if (c.isalnum() or c == '_') else '_' for c in name)
 
 
+def _param_name(p):
+    return p.split(':', 1)[0].strip()
+
+
 class NikoCCompiler:
     def __init__(self):
         self.lines = []
         self.stmts = None       # current statement list
         self.tmp = 0
         self.fn_counter = 0
-        # variable scopes: stack of dicts name -> (kind, c-name);
-        # kinds: param, local, global, func. Only function bodies push.
+        # variable scopes: stack of dicts name -> (kind, c-name, boxed);
+        # kinds: param, local, global, cap (capture unpacked from env).
+        # A boxed entry's c-name is a cell pointer (1-element NVal list);
+        # reads/writes go through nval_cell_get / nval_cell_set.
         self.var_scopes = [{}]
-        # function visibility for the body currently being generated:
-        # niko name -> (c-name, FunctionDef node)
-        self.cur_funcs = {}
         self.loop_depth = 0
-        # filled by the function-collection pass (keyed by id(node)):
-        self.func_cname = {}    # id(FunctionDef) -> C name
-        self.func_visible = {}  # id(FunctionDef)/'main' -> visible funcs
-        self.functions = []     # (node, cname) in collection order
-        self.func_closures = {}  # id(FunctionDef) -> names read from enclosing fns
-        self.current_func = None  # id(FunctionDef) while generating its body
+        # filled by the function-collection pass:
+        self.closure_info = {}  # id(FunctionDef) -> ClosureInfo
+        self.func_cname = {}    # id(FunctionDef) -> C function name
+        self.func_id = {}       # id(FunctionDef) -> int dispatch id
+        self.functions = []     # (node, ClosureInfo) in pre-order
+        self.global_names = set()
+        self.current_info = None  # ClosureInfo while generating its body
 
     # -- small helpers -------------------------------------------------
     def _emit(self, s):
@@ -202,172 +216,93 @@ class NikoCCompiler:
                 out.append(nm)
         return out
 
-    # -- function collection pass --------------------------------------
-    def _collect_functions(self, body):
-        """Assign every FunctionDef a C name; record the functions visible
-        from each function body and from main. Nested definitions are
-        hoisted to file scope. Also computes, per function, the names it
-        reads from lexically enclosing functions (closure reads), which the
-        native backend rejects with a clear error.
-        """
-        scopes = [{}]  # lexical chain of niko-name -> (cname, node)
-        fn_stack = []  # enclosing FunctionDef nodes, outermost-first
-        self._func_info = {}  # id(node) -> (params set, assigned set)
-        self._func_enclosing = {}  # id(node) -> [enclosing nodes]
-        self._global_names = set(self._assigned(body))
+    def _defnames(self, body):
+        """Names of nested `to` definitions directly in a body (not crossing
+        into their own bodies), in order."""
+        out = []
 
-        def subtree(stmts, out):
-            for s in stmts:
-                if isinstance(s, FunctionDef):
-                    out[s.name] = (self.func_cname[id(s)], s)
-                    subtree(s.body, out)
-                else:
-                    for c in self._children(s):
-                        subtree([c], out)
-
-        def walk(stmts):
-            for s in stmts:
-                if isinstance(s, FunctionDef):
-                    self.fn_counter += 1
-                    cname = f'niko_fn_{_ident(s.name)}_{self.fn_counter}'
-                    scopes[-1][s.name] = (cname, s)
-                    self.func_cname[id(s)] = cname
-                    self.functions.append((s, cname))
-                    params = set(p.split(':', 1)[0].strip()
-                                 for p in s.params)
-                    assigned = set(self._assigned(s.body))
-                    self._func_info[id(s)] = (params, assigned)
-                    self._func_enclosing[id(s)] = list(fn_stack)
-                    fn_stack.append(s)
-                    scopes.append({})
-                    walk(s.body)
-                    scopes.pop()
-                    fn_stack.pop()
-                    merged = {}
-                    for sc in scopes:
-                        merged.update(sc)
-                    sub = {}
-                    subtree(s.body, sub)
-                    merged.update(sub)
-                    self.func_visible[id(s)] = merged
-                else:
-                    for c in self._children(s):
-                        walk([c])
-
-        walk(body)
-        top = dict(scopes[0])
-        sub = {}
-        subtree(body, sub)
-        top.update(sub)
-        self.func_visible['main'] = top
-        self._compute_closures()
-
-    def _reads(self, node):
-        """Names read by a function body (not crossing nested FunctionDefs).
-        Call targets in fn position resolve as functions, not variable reads.
-        """
-        out = set()
-
-        def visit(n):
-            if isinstance(n, FunctionDef):
+        def visit(s):
+            if isinstance(s, FunctionDef):
+                out.append(s.name)
                 return
-            if isinstance(n, NameExpr):
-                out.add(n.name)
-                return
-            if isinstance(n, CallExpr):
-                if not isinstance(n.fn, NameExpr):
-                    visit(n.fn)
-                for a in n.args:
-                    visit(a)
-                return
-            if isinstance(n, AugAssignStmt):
-                out.add(n.name)
-            if dataclasses.is_dataclass(n):
-                for f in dataclasses.fields(n):
-                    if f.name == 'line':
-                        continue
-                    v = getattr(n, f.name)
-                    if isinstance(v, Node):
-                        visit(v)
-                    elif isinstance(v, list):
-                        for x in v:
-                            if isinstance(x, Node):
-                                visit(x)
+            for c in self._children(s):
+                visit(c)
 
-        for st in node.body:
-            visit(st)
+        for s in body:
+            visit(s)
+        seen, res = set(), []
+        for nm in out:
+            if nm not in seen:
+                seen.add(nm)
+                res.append(nm)
+        return res
+
+    def _bound_names(self, body):
+        """All names bound directly in a body: assignments + nested defs."""
+        out = self._assigned(body)
+        for nm in self._defnames(body):
+            if nm not in out:
+                out.append(nm)
         return out
 
-    def _compute_closures(self):
-        for node, _cname in self.functions:
-            fid = id(node)
-            params, assigned = self._func_info[fid]
-            own = params | assigned
-            closures = set()
-            for name in self._reads(node):
-                if name in own:
-                    continue
-                if name in self._global_names:
-                    continue
-                if name in BUILTIN_NAMES or name == 'pi':
-                    continue
-                if name in self.func_visible.get(fid, {}):
-                    continue  # a visible function name, not a variable
-                for enc in reversed(self._func_enclosing[fid]):
-                    ep, ea = self._func_info[id(enc)]
-                    if name in ep or name in ea:
-                        closures.add(name)
-                        break
-            self.func_closures[fid] = closures
+    # -- function collection pass --------------------------------------
+    def _collect_functions(self, body):
+        """Run the shared closure analysis; assign every FunctionDef a C
+        name and a dispatch id. All definitions are hoisted to file scope;
+        nested `to` *statements* still execute at their source position and
+        build a fresh function value (with its env of shared cells) each
+        time they run.
+        """
+        self.closure_info = analyze_closures(body)
+        for _fid, info in self.closure_info.items():
+            node = info.node
+            self.fn_counter += 1
+            cname = f'niko_fn_{_ident(info.qualname)}_{self.fn_counter}'
+            self.func_cname[id(node)] = cname
+            self.func_id[id(node)] = len(self.functions)
+            self.functions.append((node, info))
 
     # -- name resolution -----------------------------------------------
-    def _resolve(self, name, line):
-        for depth, sc in enumerate(reversed(self.var_scopes)):
+    def _lookup(self, name):
+        for sc in reversed(self.var_scopes):
             if name in sc:
-                kind, cname = sc[name]
-                if kind == 'func':
-                    raise CompileError(
-                        f"can't use the function '{name}' as a value yet",
-                        line=line)
-                if kind in ('local', 'param') and depth > 0:
-                    raise CompileError(
-                        f"the native backend can't read '{name}' from an "
-                        f"outer function yet (closures aren't supported)",
-                        line=line)
-                return kind, cname
-        if (self.current_func is not None
-                and name in self.func_closures.get(self.current_func, ())):
-            raise CompileError(
-                f"the native backend can't read '{name}' from an outer "
-                f"function yet (closures aren't supported)", line=line)
+                return sc[name]
+        return None
+
+    def _load(self, name, line):
+        """C expression reading the Niko variable `name` (cell-aware)."""
+        e = self._lookup(name)
+        if e is not None:
+            kind, cname, boxed = e
+            if boxed or kind == 'cap':
+                return f'nval_cell_get({cname})'
+            return cname
+        if name in self.global_names:
+            return f'g_{_ident(name)}'
         if name in BUILTIN_NAMES:
             raise CompileError(f"can't use the builtin '{name}' as a value",
                                line=line)
         raise CompileError(f'I don\'t know what "{name}" is.', line=line)
 
     def _store(self, name, expr_c, line):
-        sc = self.var_scopes[-1]
-        if name in sc:
-            kind, cname = sc[name]
-            if kind == 'func':
-                raise CompileError(f"cannot assign to function '{name}'",
-                                   line=line)
-            self._emit(f'{cname} = {expr_c};')
-            return cname
-        if len(self.var_scopes) > 1:
-            cname = f'v_{_ident(name)}'
-            sc[name] = ('local', cname)
+        """Emit a store of the C expression `expr_c` into `name`."""
+        e = self._lookup(name)
+        if e is None:
+            raise CompileError(
+                f'internal error: no slot for "{name}"', line=line)
+        kind, cname, boxed = e
+        if boxed or kind == 'cap':
+            # write-through to the shared box (capture by reference)
+            self._emit(f'nval_cell_set({cname}, {expr_c});')
         else:
-            cname = f'g_{_ident(name)}'
-            sc[name] = ('global', cname)
-        self._emit(f'{cname} = {expr_c};')
+            self._emit(f'{cname} = {expr_c};')
         return cname
 
-    def _func_lookup(self, name, line):
-        try:
-            return self.cur_funcs[name]
-        except KeyError:
-            raise CompileError(f'I don\'t know what "{name}" is.', line=line)
+    def _declare(self, scope, name, kind, boxed, init_c):
+        cname = f'v_{_ident(name)}'
+        scope[name] = (kind, cname, boxed)
+        self.lines.append(f'NVal *{cname} = {init_c};')
+        return cname
 
     # -- expressions: each returns a C expression of type NVal* ---------
     def gen_expr(self, n):
@@ -377,8 +312,7 @@ class NikoCCompiler:
         if isinstance(n, NameExpr):
             if n.name == 'pi':
                 return 'nval_number(3.141592653589793)'
-            _, cname = self._resolve(n.name, line)
-            return cname
+            return self._load(n.name, line)
         if isinstance(n, ListExpr):
             t = self._tmp()
             self._emit(f'NVal *{t} = nval_list();')
@@ -434,6 +368,11 @@ class NikoCCompiler:
                            "yet", line=line)
 
     def _gen_call(self, n):
+        """Every call goes through niko_call: evaluate the callee to an
+        NVal* (like the VM evaluates fn first, then args), then dispatch.
+        Builtins keep their direct C calls; the checker rejects builtins as
+        values, so a builtin name can only appear here in call position.
+        """
         line = n.line
         fn = n.fn
         if isinstance(fn, NameExpr):
@@ -447,19 +386,21 @@ class NikoCCompiler:
                 raise CompileError(
                     f"the native backend doesn't support '{name}' yet",
                     line=line)
-            cname, fnode = self._func_lookup(name, line)
-            params = [p.split(':', 1)[0].strip() for p in fnode.params]
-            if len(n.args) != len(params):
-                raise CompileError(
-                    f"'{name}' takes {len(params)} argument(s) "
-                    f"({len(n.args)} given)", line=line)
-            args = ', '.join(self.gen_expr(a) for a in n.args)
-            return f'{cname}({args})'
-        if isinstance(fn, AttrExpr):
-            raise CompileError(
-                "the native backend doesn't support method calls yet",
-                line=line)
-        raise CompileError("the native backend can't call that yet", line=line)
+            fn_c = self._load(name, line)
+        else:
+            # any other value expression: index/attribute results, results
+            # of calls, ... -- niko_call checks the tag at runtime.
+            fn_c = self.gen_expr(fn)
+        tf = self._tmp()
+        self._emit(f'NVal *{tf} = {fn_c};')
+        arg_cs = [self.gen_expr(a) for a in n.args]
+        t = self._tmp()
+        if arg_cs:
+            self._emit(f'NVal *{t}[] = {{{", ".join(arg_cs)}}};')
+            args_c = t
+        else:
+            args_c = '(NVal**)0'
+        return f'niko_call({line}, {tf}, {len(arg_cs)}, {args_c})'
 
     def _gen_builtin_call(self, name, args, line):
         argc, cname, special = _BUILTIN_C[name]
@@ -501,9 +442,10 @@ class NikoCCompiler:
                 op = _BINOP[n.op]
             except KeyError:
                 raise CompileError(f"unknown operator '{n.op}'", line=line)
-            _, cname = self._resolve(n.name, line)
+            cur = self._load(n.name, line)
             v = self.gen_expr(n.expr)
-            self._emit(f'{cname} = nval_binary({line}, {op}, {cname}, {v});')
+            self._store(n.name,
+                        f'nval_binary({line}, {op}, {cur}, {v})', line)
         elif isinstance(n, PutStmt):
             v = self.gen_expr(n.value)
             t = self.gen_expr(n.target)
@@ -513,11 +455,9 @@ class NikoCCompiler:
             v = self.gen_expr(n.value)
             self._emit(f'nval_list_remove({line}, {t}, {v});')
         elif isinstance(n, AskStmt):
-            cname = self._store(n.name,
-                                f'niko_ask_val({self.gen_expr(n.prompt)}, '
-                                f'{1 if n.want_number else 0})', line)
-            # _store already emitted; nothing more to do
-            _ = cname
+            self._store(n.name,
+                        f'niko_ask_val({self.gen_expr(n.prompt)}, '
+                        f'{1 if n.want_number else 0})', line)
         elif isinstance(n, SayStmt):
             parts = [self.gen_expr(e) for e in n.exprs]
             if parts:
@@ -560,9 +500,7 @@ class NikoCCompiler:
             self._emit(f'NVal *{tt} = nval_to_iter_list({line}, {it});')
             self._emit(f'for (int64_t {tk} = 0; {tk} < nval_list_len({tt}); '
                        f'{tk}++) {{')
-            cname = self._store(n.name,
-                                f'nval_list_item({tt}, {tk})', line)
-            _ = cname
+            self._store(n.name, f'nval_list_item({tt}, {tk})', line)
             self.loop_depth += 1
             for s in n.body:
                 self.gen_stmt(s)
@@ -585,7 +523,7 @@ class NikoCCompiler:
                 raise CompileError("'skip' needs a loop", line=line)
             self._emit('continue;')
         elif isinstance(n, FunctionDef):
-            pass  # hoisted: emitted at file scope
+            self._gen_nested_def(n)
         elif isinstance(n, ReturnStmt):
             if n.expr is not None:
                 self._emit(f'return {self.gen_expr(n.expr)};')
@@ -599,6 +537,37 @@ class NikoCCompiler:
         else:
             raise CompileError(f"the native backend can't compile "
                                f"{type(n).__name__} yet", line=line)
+
+    def _gen_nested_def(self, n):
+        """A `to` statement: build the env list of shared cells for the
+        function's captures, make the function value, store it into the
+        name's slot (a plain local, or a cell when the name itself is
+        boxed because a deeper nest captures it -- e.g. recursion through
+        the closure variable).
+        """
+        line = n.line
+        info = self.closure_info[id(n)]
+        fid = self.func_id[id(n)]
+        if info.captures:
+            te = self._tmp()
+            self._emit(f'NVal *{te} = nval_list();')
+            for cap in info.captures:
+                e = self._lookup(cap)
+                if e is None:
+                    raise CompileError(
+                        f'internal error: no cell for capture "{cap}"',
+                        line=line)
+                _kind, cname, _boxed = e
+                # both boxed own-locals and unpacked env captures are cells
+                self._emit(f'nval_list_push({te}, {cname});')
+            env_c = te
+        else:
+            env_c = 'nval_list()'
+        tf = self._tmp()
+        name_b = n.name.encode('utf-8')
+        self._emit(f'NVal *{tf} = nval_function({fid}, {_cstr(n.name)}, '
+                   f'{len(name_b)}, {env_c});')
+        self._store(n.name, tf, line)
 
     def _gen_match(self, n):
         line = n.line
@@ -648,57 +617,92 @@ class NikoCCompiler:
             self._store(p.name, f'b_error_message({line}, {ts})', line)
 
     # -- functions / main ----------------------------------------------
-    def _gen_function_body(self, node):
+    def _gen_function_body(self, node, info):
         cname = self.func_cname[id(node)]
-        params = [p.split(':', 1)[0].strip() for p in node.params]
-        pc = ', '.join(f'NVal *p_{_ident(p)}' for p in params)
-        self.lines.append(f'static NVal *{cname}({pc}) {{')
-        self.var_scopes.append({})
-        for p in params:
-            self.var_scopes[-1][p] = ('param', f'p_{_ident(p)}')
-        for nm in self._assigned(node.body):
-            self.var_scopes[-1][nm] = ('local', f'v_{_ident(nm)}')
-            self.lines.append(f'NVal *v_{_ident(nm)} = nval_nothing();')
-        self.cur_funcs = self.func_visible[id(node)]
-        self.current_func = id(node)
+        params = [_param_name(p) for p in node.params]
+        self.lines.append(
+            f'static NVal *{cname}(NVal *env, int nargs, NVal **args) {{')
+        self.lines.append(
+            f'    if (nargs != {len(params)}) '
+            f'niko_arity_panic({_cstr(node.name)}, {len(params)}, nargs);')
+        scope = {}
+        self.var_scopes.append(scope)
+        for i, p in enumerate(params):
+            boxed = p in info.boxes
+            init = f'nval_cell(args[{i}])' if boxed else f'args[{i}]'
+            self._declare(scope, p, 'param', boxed, init)
+        # Captured names always resolve to the shared env cell -- even when
+        # the function also assigns the name later (like the VM, whose STORE
+        # writes through a Cell when one is present). The analysis only
+        # puts a name in captures when some read targets an enclosing
+        # scope, so the cell is the right slot for every access.
+        # (Params can never be captures: the analysis marks params bound
+        # before any read.)
+        caps = set(info.captures)
+        for i, cap in enumerate(info.captures):
+            cname_cap = f'c_{_ident(cap)}'
+            scope[cap] = ('cap', cname_cap, True)
+            self.lines.append(
+                f'NVal *{cname_cap} = nval_list_item(env, {i});')
+        for nm in self._bound_names(node.body):
+            if nm in scope or nm in caps:
+                continue
+            boxed = nm in info.boxes
+            init = 'nval_cell(nval_nothing())' if boxed else 'nval_nothing()'
+            self._declare(scope, nm, 'local', boxed, init)
+        if not info.captures:
+            self.lines.append('    (void)env;')
+        self.current_info = info
         saved, self.stmts = self.stmts, []
         for s in node.body:
             self.gen_stmt(s)
-        self.lines.extend(self.stmts)
-        self.lines.append('return nval_nothing();')
+        self.lines.extend('    ' + s for s in self.stmts)
+        self.lines.append('    return nval_nothing();')
         self.lines.append('}')
         self.stmts = saved
         self.var_scopes.pop()
-        self.current_func = None
+        self.current_info = None
 
     def compile_c(self, tree):
         body = tree.body if isinstance(tree, Program) else tree
         self._collect_functions(body)
         out = ['#include "niko_runtime.h"', '']
-        gnames = self._assigned(body)
+        for node, _info in self.functions:
+            cname = self.func_cname[id(node)]
+            out.append(f'static NVal *{cname}(NVal *env, int nargs, '
+                       f'NVal **args);')
+        out.append('')
+        gnames = self._bound_names(body)
         for nm in gnames:
             out.append(f'static NVal *g_{_ident(nm)};')
-            self.var_scopes[0][nm] = ('global', f'g_{_ident(nm)}')
-        if out[-1] != '':
-            out.append('')
-        for node, cname in self.functions:
-            params = [p.split(':', 1)[0].strip() for p in node.params]
-            pc = ', '.join(f'NVal *p_{_ident(p)}' for p in params)
-            out.append(f'static NVal *{cname}({pc});')
+            self.var_scopes[0][nm] = ('global', f'g_{_ident(nm)}', False)
+        self.global_names = set(gnames)
         out.append('')
         self.lines = out
-        for node, _cname in self.functions:
-            self._gen_function_body(node)
+        for node, info in self.functions:
+            self._gen_function_body(node, info)
+        # dispatch: the runtime's niko_call checks the tag, then lands here
+        self.lines.append('NVal *niko_call_dispatch(int line, int32_t func_id, '
+                          'NVal *env, int nargs, NVal **args) {')
+        self.lines.append('    switch (func_id) {')
+        for node, _info in self.functions:
+            cname = self.func_cname[id(node)]
+            fid = self.func_id[id(node)]
+            self.lines.append(
+                f'    case {fid}: return {cname}(env, nargs, args);')
+        self.lines.append('    default: niko_panic(line, "bad function id");')
+        self.lines.append('    }')
+        self.lines.append('    return 0;')
+        self.lines.append('}')
         # main runs in the global scope (var_scopes[0])
         self.lines.append('int main(void) {')
         for nm in gnames:
-            self.lines.append(f'g_{_ident(nm)} = nval_nothing();')
-        self.cur_funcs = self.func_visible['main']
+            self.lines.append(f'    g_{_ident(nm)} = nval_nothing();')
         saved, self.stmts = self.stmts, []
         for s in body:
             self.gen_stmt(s)
-        self.lines.extend(self.stmts)
-        self.lines.append('return 0;')
+        self.lines.extend('    ' + s for s in self.stmts)
+        self.lines.append('    return 0;')
         self.lines.append('}')
         self.stmts = saved
         return '\n'.join(self.lines) + '\n'

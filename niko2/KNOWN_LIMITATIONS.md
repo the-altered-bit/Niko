@@ -164,9 +164,11 @@ it's formatting/diagnosing is closer to feature-complete.
 - **No file-I/O builtins** (`read_file`, `write_file`, `append_file`,
   `read_lines`, `file_exists`, `try_read_file`). They raise `CompileError`.
 - **No method-call syntax** (`x.method(...)`); use the builtin form.
-- **No closures over enclosing function locals.** The VM captures them;
-  WASM raises `CompileError` — a real parity gap, not a silent mismatch.
-- **No first-class function values.** Functions are called by name only.
+- **Closures and first-class functions work** (Alpha 10): nested `to`
+  captures enclosing locals by reference, `set f to add` aliases functions,
+  functions pass as arguments, return from functions, and live in
+  lists/records — byte-identical to the VM (`tests/test_wasm.py` runs the
+  8 canonical closure programs differentially).
 - **`ask` needs a host.** Under node it reads stdin; other runtimes must
   provide the `niko_input` import.
 - **`now()`/`today()`/`random_int` come from the host** environment.
@@ -181,12 +183,12 @@ generated code). Same value model as WASM (boxed values, f64 numbers).
 - **Numbers are f64**, printed with shortest-round-trip formatting so
   `say` output matches the VM exactly.
 - **`upper`/`lower` are ASCII-only**, like WASM.
-- **No `use` imports**, no method-call syntax, no first-class function
-  values — same as WASM.
-- **No closures over enclosing function locals** — raises `CompileError`
-  with the offending name and line, same as WASM (the VM can't even
-  *define* a nested function at runtime; both compiled backends hoist
-  nested definitions and run non-closure nests fine).
+- **No `use` imports**, no method-call syntax — same as WASM.
+- **Closures and first-class functions work** (Alpha 10): nested `to`
+  captures enclosing locals by reference; functions are values (aliases,
+  arguments, return values, list/record members) — byte-identical to the
+  VM (`tests/test_native.py` runs the 8 canonical closure programs
+  differentially).
 - **The VM's constant-pool dedup bug is not mirrored.** Native output is
   correct where the VM prints `yes` as `1`.
 - **Panic behavior:** runtime errors print `Niko error at line N: msg` to

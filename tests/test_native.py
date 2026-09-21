@@ -1,4 +1,4 @@
-"""Alpha 9: differential tests — native backend output vs VM output.
+"""Alpha 9/10: differential tests — native backend output vs VM output.
 
 Skips if no C compiler (cc/gcc/clang) is on PATH.
 
@@ -7,11 +7,6 @@ True == 1 and False == 0, so `constants.index(v)` can deduplicate
 `yes` with `1` and `no` with `0`, printing the wrong one when both
 appear in a program. The native backend is correct. Test programs avoid
 mixing yes/no with 1/0 literals to keep the VM output canonical.
-
-The VM also can't define a function inside another function at runtime
-(a VM limitation; both the WASM and native backends hoist nested
-definitions and run them fine). Differential programs avoid nested
-function definitions.
 """
 import os, pathlib, shutil, subprocess, sys, tempfile
 
@@ -32,17 +27,22 @@ def run_vm(src, cwd=None, input_text=None):
         assert r.returncode == 0, f'VM failed: {r.stderr[:300]}'
         return r.stdout
 
-def run_native(src, cwd=None, input_text=None):
+def run_native_full(src, cwd=None, input_text=None):
+    """Run `niko2 native --run`; return (returncode, stdout, stderr) with
+    the 'built ...' banner stripped from stdout."""
     with tempfile.TemporaryDirectory() as tmp:
         p = pathlib.Path(tmp) / 't.niko'
         p.write_text(src, encoding='utf8')
         r = niko2('native', str(p), '--run', cwd=cwd, input_text=input_text)
-        assert r.returncode == 0, f'native failed: {r.stderr[:500]}'
-        # strip the "✓ built ..." line
         lines = r.stdout.splitlines(keepends=True)
         if lines and lines[0].startswith('✓ built'):
             lines = lines[1:]
-        return ''.join(lines)
+        return r.returncode, ''.join(lines), r.stderr
+
+def run_native(src, cwd=None, input_text=None):
+    rc, out, err = run_native_full(src, cwd=cwd, input_text=input_text)
+    assert rc == 0, f'native failed: {(out + err)[:500]}'
+    return out
 
 def assert_same(src, **kw):
     n = run_native(src, **kw)
@@ -124,25 +124,75 @@ def test_native_differential():
         assert_same(src)
         print(f'ok: {name}')
 
-def test_native_unsupported_closure():
-    # closures over enclosing function locals are a parity gap -> CompileError
+def test_native_closures():
+    # Alpha 10: the canonical closure programs, byte-identical to the
+    # expected output (the VM asserts the same in test_closures.py).
     if not cc:
         print('SKIP: no C compiler on PATH')
         return
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
     sys.path.insert(0, str(root))
-    from niko2.parser import parse
-    from niko2.typecheck import check
-    from niko2.backends.native import NativeBackend, CompileError
-    src = 'to outer:\n    set x to 1\n    to inner:\n        say x\n'
-    tree = parse(src)
-    check(tree, [])
-    try:
-        NativeBackend().compile(tree)
-    except CompileError as e:
-        assert "closures aren't supported" in str(e), str(e)
-        print('ok: closure rejected')
+    from test_closures import CLOSURE_CASES
+    for name, src, want in CLOSURE_CASES:
+        rc, out, err = run_native_full(src)
+        assert rc == 0, f'native[{name}] failed: {(out + err)[:500]}'
+        assert out == want, \
+            f'native[{name}] mismatch:\ngot  {out!r}\nwant {want!r}'
+        print(f'ok: closure {name}')
+
+def test_native_closure_extras():
+    # first-class functions beyond the canonical cases: stored in records
+    # (index and attribute call), rebinding a function name, equality.
+    if not cc:
+        print('SKIP: no C compiler on PATH')
         return
-    raise AssertionError('expected CompileError for closure')
+    assert_same(
+        'to add with a, b:\n    give back a + b\n'
+        'set r to {"f": add}\n'
+        'say r["f"](1, 2)\n'
+        'say r.f(3, 4)\n'
+        'set g to add\n'
+        'say g is add\n'
+        'set add to 5\n'
+        'say add\n')
+    assert_same(
+        'to mk:\n'
+        '    set xs to []\n'
+        '    to push with v:\n'
+        '        put v in xs\n'
+        '    to get:\n'
+        '        give back xs\n'
+        '    give back [push, get]\n'
+        'set p to mk()\n'
+        'set q to mk()\n'
+        'p[1](10)\n'
+        'p[1](20)\n'
+        'q[1](99)\n'
+        'say p[2]()\n'
+        'say q[2]()\n')
+
+def test_native_closure_errors():
+    # calling a non-function value: same message as the VM
+    if not cc:
+        print('SKIP: no C compiler on PATH')
+        return
+    src = 'set r to ok(5)\nset v to unwrap(r)\nsay v(1)\n'
+    rc, out, err = run_native_full(src)
+    assert rc != 0, 'calling a non-function should fail'
+    assert "I can't call 5 as a function." in out + err, out + err
+    print('ok: cannot-call message')
+    # arity is checked at call time, same wording as the VM
+    src = 'to add with a, b:\n    give back a + b\nsay add(1)\n'
+    rc, out, err = run_native_full(src)
+    assert rc != 0, 'arity mismatch should fail'
+    assert 'add expected 2 arguments, got 1.' in out + err, out + err
+    print('ok: arity message')
+    # builtins are still not values (checker rejects before codegen)
+    src = 'set f to length\n'
+    rc, out, err = run_native_full(src)
+    assert rc != 0
+    assert 'can\'t use the builtin "length" as a value' in out + err, out + err
+    print('ok: builtin-as-value rejected')
 
 def test_native_files():
     # file builtins work in native builds (the WASM backend lacks these)
@@ -174,7 +224,9 @@ def test_native_ask():
 
 if __name__ == '__main__':
     test_native_differential()
-    test_native_unsupported_closure()
+    test_native_closures()
+    test_native_closure_extras()
+    test_native_closure_errors()
     test_native_files()
     test_native_ask()
     print('all native tests passed')

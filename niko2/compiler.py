@@ -2,17 +2,25 @@
 from .ast import *
 from .ir import IRBuilder, FunctionCode, ModuleCode
 from .diagnostics import Diagnostic
+from .closures import analyze_closures
 
 class CompileError(Diagnostic): pass
 
 class Compiler:
     def compile(self, tree):
         self.b=IRBuilder(); self.loop_stack=[]
+        # Alpha 10: every FunctionDef (incl. nested) gets a unique qualname and
+        # a captures list; all of them are registered in module_functions so
+        # MAKE_FUNCTION can find nested definitions at runtime.
+        self.closure_info=analyze_closures(tree)
+        self.module_functions={}
         for n in tree.body:
             if isinstance(n,UseStmt): continue
             self.stmt(n)
         self.b.emit('HALT',line=tree.line)
-        return self.b.finish()
+        mod=self.b.finish()
+        mod.functions=self.module_functions
+        return mod
 
     def stmt(self,n,b=None):
         b=b or self.b
@@ -36,14 +44,19 @@ class Compiler:
             else: self.expr(n.expr,b)
             b.emit('RETURN',line=n.line)
         elif isinstance(n,FunctionDef):
+            info=self.closure_info[id(n)]
             fb=IRBuilder(); old=self.b; oldloops=self.loop_stack
             self.b=fb; self.loop_stack=[]
             for x in n.body: self.stmt(x,fb)
             fb.emit('PUSH_CONST',fb.const(None,n.line),n.line); fb.emit('RETURN',line=n.line)
             self.b=old; self.loop_stack=oldloops
-            # function constants are stored by name in module metadata
-            self.b.functions[n.name]=FunctionCode(n.name,[p.split(':',1)[0].strip() for p in n.params],fb.code,n.return_type,fb.constants)
-            self.b.emit('MAKE_FUNCTION',n.name,n.line); self.b.emit('STORE',n.name,n.line)
+            # Alpha 10: registered module-wide under the qualname so nested
+            # definitions survive (the old code dropped the enclosing
+            # builder's .functions table, so nested defs KeyError'd at
+            # runtime). MAKE_FUNCTION looks the qualname up in VM._functions.
+            self.module_functions[info.qualname]=FunctionCode(n.name,[p.split(':',1)[0].strip() for p in n.params],fb.code,n.return_type,fb.constants,
+                qualname=info.qualname,captures=info.captures,nested=info.nested)
+            self.b.emit('MAKE_FUNCTION',info.qualname,n.line); self.b.emit('STORE',n.name,n.line)
         elif isinstance(n,IfStmt): self.if_stmt(n,b)
         elif isinstance(n,MatchStmt): self.match_stmt(n,b)
         elif isinstance(n,RepeatStmt):

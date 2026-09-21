@@ -20,6 +20,7 @@ from ..ast import (
 )
 from ..compiler import CompileError
 from ..typecheck import BUILTIN_NAMES
+from ..closures import analyze_closures
 from . import Backend
 
 I32 = 0x7F
@@ -35,6 +36,7 @@ TAG_YESNO = 3
 TAG_LIST = 4
 TAG_RECORD = 5
 TAG_RESULT = 6
+TAG_FUNCTION = 7  # Alpha 10: first-class function value
 
 SCRATCH = 0x0000          # host scratch region (4 KiB)
 SCRATCH_SIZE = 0x1000
@@ -132,6 +134,11 @@ class W:
 
     def call(self, idx):
         self.b += b"\x10" + uleb(idx)
+
+    def call_indirect(self, typeidx, tableidx=0):
+        # Alpha 10: uniform indirect calls of Niko functions through the
+        # single funcref table. Stack: [args..., table_index].
+        self.b += b"\x11" + uleb(typeidx) + uleb(tableidx)
 
     # -- parametric ---------------------------------------------------------
     def drop(self):
@@ -340,6 +347,9 @@ class WasmModule:
         self.exports = []          # (name, kind, idx)
         self.mem_min = 64
         self.datas = []            # (offset, bytes)
+        # Alpha 10: one funcref table holding every user (Niko) function, in
+        # declaration order. Function values store the table index.
+        self.table = []            # funcidx per table slot
 
     def add_type(self, params, results):
         key = (tuple(params), tuple(results))
@@ -367,6 +377,11 @@ class WasmModule:
         self.globals.append((vtype, mutable, init_b))
         return len(self.globals) - 1
 
+    def add_table_entry(self, funcidx):
+        """Register a user function in the funcref table; returns its index."""
+        self.table.append(funcidx)
+        return len(self.table) - 1
+
     def add_export(self, name, kind, idx):
         self.exports.append((name, kind, idx))
 
@@ -392,6 +407,10 @@ class WasmModule:
             section(2, p)
         if self.funcs:
             section(3, vec([uleb(f._typeidx) for f in self.funcs]))
+        # table section (4): one funcref table for the user functions. Always
+        # emitted (possibly empty): call_fn's call_indirect is validated
+        # statically even in programs that define no functions.
+        section(4, vec([b"\x70\x00" + uleb(len(self.table))]))
         # memory
         section(5, vec([b"\x00" + uleb(self.mem_min)]))
         if self.globals:
@@ -403,6 +422,10 @@ class WasmModule:
             p = vec([enc_str(n) + bytes([kinds[k]]) + uleb(i)
                      for n, k, i in self.exports])
             section(7, p)
+        if self.table:
+            # elem section (9): single active segment filling the table from 0
+            section(9, vec([b"\x00" + b"\x41\x00\x0b"
+                            + vec([uleb(f) for f in self.table])]))
         if self.funcs:
             bodies = []
             for f in self.funcs:
@@ -512,6 +535,9 @@ class WasmCompiler:
         self.yes_text = self.text_val("yes")
         self.no_text = self.text_val("no")
         self.nothing_text = self.text_val("nothing")
+        # Alpha 10: the single WASM type of every Niko function:
+        # (env_ptr, nargs, args_ptr) -> boxed value pointer.
+        self.niko_fn_type = m.add_type([I32, I32, I32], [I32])
         self._build_helpers()
         # $heap starts after all static data (helpers add their literals).
         m.globals[self.heap_g] = (I32, True, b"\x41" + sleb(self.data_ptr) + b"\x0b")
@@ -569,6 +595,10 @@ class WasmCompiler:
         ("record_get", [I32, I32, I32], [I32]),
         ("record_find", [I32, I32], [I32]),
         ("attr", [I32, I32, I32], [I32]),
+        # Alpha 10: closures / first-class functions
+        ("box_new", [I32], [I32]),
+        ("make_fn", [I32, I32, I32, I32], [I32]),
+        ("call_fn", [I32, I32, I32, I32], [I32]),
     ]
 
     def _build_helpers(self):
@@ -607,6 +637,7 @@ class WasmCompiler:
         self._h_list_misc()
         self._h_index()
         self._h_records()
+        self._h_boxes()
         self._h_builtins()
 
     # -- core runtime helpers -----------------------------------------------
@@ -1020,6 +1051,14 @@ class WasmCompiler:
         w.i32_const(self.text_val('"'))
         w.call(self.h["concat3"]); w.return_()
         w.end()
+        # function -> function "name" (simple source name, like the VM)
+        w.local_get(tag); w.i32_const(TAG_FUNCTION); w.i32_eq()
+        l = w.if_()
+        w.i32_const(self.text_val('function "'))
+        w.local_get(0); w.i32_load(8)
+        w.i32_const(self.text_val('"'))
+        w.call(self.h["concat3"]); w.return_()
+        w.end()
         w.unreachable()
 
     def _h_fmt_nested(self):
@@ -1281,6 +1320,12 @@ class WasmCompiler:
         w.local_get(ta); w.i32_const(TAG_RECORD); w.i32_eq()
         l = w.if_()
         w.local_get(0); w.local_get(1); w.call(self.h["record_eq"]); w.return_()
+        w.end()
+        # Alpha 10: functions compare by identity (same value pointer), like
+        # the VM's Python-object equality for VMFunction.
+        w.local_get(ta); w.i32_const(TAG_FUNCTION); w.i32_eq()
+        l = w.if_()
+        w.local_get(0); w.local_get(1); w.i32_eq(); w.return_()
         w.end()
         # result
         w.local_get(0); w.i32_load(4); w.local_get(1); w.i32_load(4); w.i32_ne()
@@ -1946,6 +1991,85 @@ class WasmCompiler:
 
     def _bh(self, name):
         return self.hf["b_" + name]
+
+    def _h_boxes(self):
+        # Alpha 10: closures + first-class functions.
+        #
+        # A cell is 8 heap bytes holding one boxed-value pointer; sharing the
+        # cell pointer is capture by reference. A function value is 20 bytes:
+        # [tag=7, table_idx, name_ptr (text), nparams, env_ptr]. env_ptr
+        # points at ncaptures*4 heap bytes holding cell pointers (0 = none).
+        f = self._helper("box_new", [I32], [I32])
+        w = f.w
+        c = f.new_local()
+        w.i32_const(8); w.call(self.h["alloc"]); w.local_set(c)
+        w.local_get(c); w.local_get(0); w.i32_store(0)
+        w.local_get(c)
+
+        f = self._helper("make_fn", [I32, I32, I32, I32], [I32])
+        w = f.w
+        v = f.new_local()
+        w.i32_const(20); w.call(self.h["alloc"]); w.local_set(v)
+        w.local_get(v); w.i32_const(TAG_FUNCTION); w.i32_store(0)
+        w.local_get(v); w.local_get(0); w.i32_store(4)
+        w.local_get(v); w.local_get(1); w.i32_store(8)
+        w.local_get(v); w.local_get(2); w.i32_store(12)
+        w.local_get(v); w.local_get(3); w.i32_store(16)
+        w.local_get(v)
+
+        # call_fn(line, fn, nargs, args_ptr): every call site goes through
+        # here. Tag check -> `I can't call <v> as a function.`; arity check ->
+        # `<name> expected <p> arguments, got <n>.`; then call_indirect with
+        # the uniform (env_ptr, nargs, args_ptr) signature.
+        f = self._helper("call_fn", [I32, I32, I32, I32], [I32])
+        w = f.w
+        sb = f.new_local(); tv = f.new_local()
+        # not a function value -> trap
+        w.local_get(1); w.i32_load(0); w.i32_const(TAG_FUNCTION); w.i32_ne()
+        l = w.if_()
+        w.call(self.h["sb_new"]); w.local_set(sb)
+        w.local_get(sb); w.i32_const(self.text_val("I can't call "))
+        w.call(self.h["sb_push_text"])
+        w.local_get(sb); w.local_get(1); w.call(self.h["to_text"])
+        w.call(self.h["sb_push_text"])
+        w.local_get(sb); w.i32_const(self.text_val(" as a function."))
+        w.call(self.h["sb_push_text"])
+        w.local_get(sb); w.call(self.h["sb_finish"]); w.local_set(tv)
+        w.local_get(0); w.local_get(tv); w.i32_load(4)
+        w.local_get(tv); w.i32_load(8)
+        w.call(self.h["panic_line"])
+        w.unreachable()
+        w.end()
+        # arity check: nargs (param 2) vs nparams (fn[12])
+        w.local_get(2); w.local_get(1); w.i32_load(12); w.i32_ne()
+        l = w.if_()
+        w.call(self.h["sb_new"]); w.local_set(sb)
+        w.local_get(sb); w.local_get(1); w.i32_load(8)
+        w.call(self.h["sb_push_text"])
+        w.local_get(sb); w.i32_const(self.text_val(" expected "))
+        w.call(self.h["sb_push_text"])
+        w.local_get(sb); w.local_get(1); w.i32_load(12)
+        w.f64_convert_i32_s(); w.call(self.h["make_number"])
+        w.call(self.h["to_text"]); w.call(self.h["sb_push_text"])
+        w.local_get(sb); w.i32_const(self.text_val(" arguments, got "))
+        w.call(self.h["sb_push_text"])
+        w.local_get(sb); w.local_get(2)
+        w.f64_convert_i32_s(); w.call(self.h["make_number"])
+        w.call(self.h["to_text"]); w.call(self.h["sb_push_text"])
+        w.local_get(sb); w.i32_const(self.text_val("."))
+        w.call(self.h["sb_push_text"])
+        w.local_get(sb); w.call(self.h["sb_finish"]); w.local_set(tv)
+        w.local_get(0); w.local_get(tv); w.i32_load(4)
+        w.local_get(tv); w.i32_load(8)
+        w.call(self.h["panic_line"])
+        w.unreachable()
+        w.end()
+        # indirect call: stack [env_ptr, nargs, args_ptr, table_idx]
+        w.local_get(1); w.i32_load(16)
+        w.local_get(2)
+        w.local_get(3)
+        w.local_get(1); w.i32_load(4)
+        w.call_indirect(self.niko_fn_type)
 
     def _h_builtins(self):
         self._b_length(); self._b_text(); self._b_number(); self._b_item_of()
@@ -3090,14 +3214,37 @@ class WasmCompiler:
         """Compile a *checked* AST Program to a WASM binary."""
         self._setup()
         self.builtin_names = {name for name, _, _ in self.BUILTIN_SIGS}
-        self.scopes = [{}]      # module scope; name -> ('local'|'global'|'func', idx)
+        # Alpha 10: shared closure analysis (niko2/closures.py) drives boxing,
+        # capture environments, and the uniform function signature.
+        self.closure_info = analyze_closures(tree)
+        self.scopes = [{}]      # module scope; name -> ('local'|'global', idx)
         self.loop_stack = []    # (break_lbl, cont_lbl) label pairs
         self.fn_for = {}        # id(FunctionDef) -> Func
+        self.fn_table_idx = {}  # id(FunctionDef) -> funcref table index
+        self.cur_info = None    # ClosureInfo of the function being generated
         self._declare_fns(tree.body)
         main = self.m.add_function([], [])
         self.m.add_export("main", "func", main.idx)
         self.m.add_export("memory", "memory", 0)
         self.cur = main
+        # Alpha 10: materialize every top-level function as a value in its
+        # global slot before any user code runs, so named calls, `set f to
+        # add`, recursion, and mutual recursion all resolve through the
+        # slots (like the VM's execute(), which installs every non-nested
+        # function upfront — including ones inside module-level blocks).
+        for _id, info in self.closure_info.items():
+            if info.nested:
+                continue
+            n = info.node
+            gidx = self.m.add_global(I32, True, 0)
+            self.scopes[0][n.name] = ('global', gidx)
+            w = main.w
+            w.i32_const(self.fn_table_idx[_id])
+            w.i32_const(self.text_val(n.name))
+            w.i32_const(len(n.params))
+            w.i32_const(0)  # empty env
+            w.call(self.h["make_fn"])
+            w.global_set(gidx)
         self._gen_block(tree.body)
         main.w.return_()
         # $heap must start after ALL static data, including user literals
@@ -3108,10 +3255,14 @@ class WasmCompiler:
 
     # -- function declaration (pass A: recursion and nesting work) --------
     def _declare_fns(self, stmts):
+        # Alpha 10: every Niko function (module-level and nested) gets the
+        # uniform (env_ptr, nargs, args_ptr) -> boxed signature and a slot in
+        # the single funcref table, in source pre-order.
         for n in stmts:
             if isinstance(n, FunctionDef):
-                f = self.m.add_function([I32] * len(n.params), [I32])
+                f = self.m.add_function([I32, I32, I32], [I32])
                 self.fn_for[id(n)] = f
+                self.fn_table_idx[id(n)] = self.m.add_table_entry(f.idx)
             for child in self._child_blocks(n):
                 self._declare_fns(child)
 
@@ -3132,19 +3283,41 @@ class WasmCompiler:
                 yield n.otherwise
 
     # -- name binding -------------------------------------------------------
+    def _is_boxed(self, name):
+        """True when `name` is a boxed local of the function being generated
+        (Alpha 10): the WASM local holds a cell pointer, not the value."""
+        return self.cur_info is not None and name in self.cur_info.boxes
+
     def _store(self, name, line):
-        """Store top-of-stack into `name` (always the current scope: the VM
-        never writes through a closure)."""
+        """Store top-of-stack into `name` in the current scope. Boxed names
+        hold cell pointers: the store writes through the cell, so every
+        closure sharing the box sees the write (capture by reference)."""
         w = self.cur.w
         sc = self.scopes[-1]
         if name in sc:
             kind, idx = sc[name]
-            if kind == 'func':
-                raise CompileError(f"cannot assign to function '{name}'", line=line)
-            if kind == 'local':
+            if kind == 'local' and self._is_boxed(name):
+                t = self.cur.new_local()
+                w.local_set(t)
+                w.local_get(idx); w.local_get(t); w.i32_store(0)
+            elif kind == 'local':
                 w.local_set(idx)
             else:
                 w.global_set(idx)
+            return
+        # Alpha 10: assigning to a captured name writes through the shared
+        # box in our env array (the VM's frame env holds the cells, so its
+        # STORE writes through too — never a fresh shadowing local).
+        if self.cur_info is not None and name in self.cur_info.captures:
+            pos = self.cur_info.captures.index(name)
+            t = self.cur.new_local()
+            w.local_set(t)  # stack was [V]
+            w.local_get(0)  # env_ptr is param 0
+            if pos:
+                w.i32_const(pos * 4); w.i32_add()
+            w.i32_load(0)  # cell pointer
+            w.local_get(t)
+            w.i32_store(0)
             return
         if len(self.scopes) > 1:
             idx = self.cur.new_local()
@@ -3157,38 +3330,36 @@ class WasmCompiler:
 
     def _load(self, name, line):
         w = self.cur.w
-        for depth, sc in enumerate(reversed(self.scopes)):
-            if name in sc:
-                kind, idx = sc[name]
-                if kind == 'local':
-                    if depth > 0:
-                        raise CompileError(
-                            f"the WASM backend can't read '{name}' from an outer "
-                            f"function yet (closures aren't supported)", line=line)
-                    w.local_get(idx)
-                    return
-                if kind == 'global':
-                    w.global_get(idx)
-                    return
-                raise CompileError(
-                    f"can't use the function '{name}' as a value yet", line=line)
+        sc = self.scopes[-1]
+        if name in sc:
+            kind, idx = sc[name]
+            if kind == 'local':
+                w.local_get(idx)
+                if self._is_boxed(name):
+                    w.i32_load(0)  # deref the cell
+                return
+            w.global_get(idx)
+            return
+        # Module globals are one shared namespace, visible everywhere.
+        if len(self.scopes) > 1 and name in self.scopes[0]:
+            w.global_get(self.scopes[0][name][1])
+            return
+        # Alpha 10: captured name — the shared box lives in our env array
+        # (env_ptr is param 0), at captures.index(name).
+        if self.cur_info is not None and name in self.cur_info.captures:
+            pos = self.cur_info.captures.index(name)
+            w.local_get(0)
+            if pos:
+                w.i32_const(pos * 4); w.i32_add()
+            w.i32_load(0)  # cell pointer
+            w.i32_load(0)  # value
+            return
         if name in self.builtin_names:
             raise CompileError(
                 f"can't use the builtin '{name}' as a value", line=line)
         if name in BUILTIN_NAMES or name == 'pi':
             raise CompileError(
                 f"the WASM backend doesn't support '{name}' yet", line=line)
-        raise CompileError(f'I don\'t know what "{name}" is.', line=line)
-
-    def _func_idx(self, name, line):
-        for sc in reversed(self.scopes):
-            if name in sc:
-                kind, idx = sc[name]
-                if kind == 'func':
-                    return idx
-                raise CompileError(f"'{name}' isn't a function", line=line)
-        if name in self.builtin_names or name in BUILTIN_NAMES or name == 'pi':
-            raise CompileError(f"'{name}' isn't a user function", line=line)
         raise CompileError(f'I don\'t know what "{name}" is.', line=line)
 
     # -- statements ----------------------------------------------------------
@@ -3404,18 +3575,83 @@ class WasmCompiler:
             self._gen_block(n.otherwise)
         w.end()
 
+    def _capture_cell(self, info, cname):
+        """Push the cell pointer for captured name `cname` (used when a
+        nested `to` statement builds its env array). `info` is the
+        ClosureInfo of the enclosing function; scopes[-1] is its scope."""
+        w = self.cur.w
+        if cname in info.boxes:
+            # own boxed local: the WASM local already holds the cell pointer
+            w.local_get(self.scopes[-1][cname][1])
+            return
+        # pass-through: the box lives in our own env array (param 0)
+        pos = info.captures.index(cname)
+        w.local_get(0)
+        if pos:
+            w.i32_const(pos * 4); w.i32_add()
+        w.i32_load(0)  # cell pointer (the env holds cells, no deref)
+
     def _gen_function(self, n):
+        # Alpha 10: first-class functions with capture-by-reference.
+        info = self.closure_info[id(n)]
         f = self.fn_for[id(n)]
-        self.scopes[-1][n.name] = ('func', f.idx)
-        self.scopes.append({})
+        enclosing_info = self.cur_info
+        if info.nested:
+            # MAKE_FUNCTION, emitted into the enclosing function: allocate
+            # the env array, fill it with the current cells for
+            # captures(info), build the function value, store it to the name.
+            # Cells already exist (boxed locals are allocated at function
+            # entry), so every `to` execution in a loop shares the same box
+            # — Python semantics, matching the VM's wrap-or-create.
+            w = self.cur.w
+            w.i32_const(self.fn_table_idx[id(n)])
+            w.i32_const(self.text_val(n.name))
+            w.i32_const(len(n.params))
+            ncaps = len(info.captures)
+            if ncaps:
+                w.i32_const(ncaps * 4)
+                w.call(self.h["alloc"])
+                env = self.cur.new_local()
+                w.local_set(env)
+                for i, cname in enumerate(info.captures):
+                    w.local_get(env)
+                    self._capture_cell(enclosing_info, cname)
+                    w.i32_store(i * 4)
+                w.local_get(env)
+            else:
+                w.i32_const(0)  # empty env
+            w.call(self.h["make_fn"])
+            self._store(n.name, n.line)
+        # Module-level functions are materialized in main's prologue; their
+        # `to` statements emit no runtime code, just the body below.
         old = self.cur
-        self.cur = f
+        self.scopes.append({})
+        self.cur, self.cur_info = f, info
+        w = f.w
+        # Uniform signature: params are (env_ptr, nargs, args_ptr).
         for k, p in enumerate(n.params):
             pname = p.split(':', 1)[0].strip()
-            self.scopes[-1][pname] = ('local', k)
+            pl = f.new_local()
+            w.local_get(2)
+            if k:
+                w.i32_const(k * 4); w.i32_add()
+            w.i32_load(0)  # args[k]: boxed value pointer
+            if pname in info.boxes:
+                w.call(self.h["box_new"])  # param captured: box it eagerly
+            w.local_set(pl)
+            self.scopes[-1][pname] = ('local', pl)
+        # Every other boxed name (assigned locals, nested def names captured
+        # from here) gets a fresh cell per call, initialized to nothing.
+        for bname in info.boxes:
+            if bname not in self.scopes[-1]:
+                bl = f.new_local()
+                w.i32_const(self.nothing_addr)
+                w.call(self.h["box_new"])
+                w.local_set(bl)
+                self.scopes[-1][bname] = ('local', bl)
         self._gen_block(n.body)
-        f.w.i32_const(0); f.w.return_()
-        self.cur = old
+        w.i32_const(self.nothing_addr); w.return_()
+        self.cur, self.cur_info = old, enclosing_info
         self.scopes.pop()
 
     # -- expressions ----------------------------------------------------------
@@ -3495,6 +3731,12 @@ class WasmCompiler:
                                line=line)
 
     def _gen_call(self, n):
+        # Alpha 10: every call site evaluates the callee to a value and goes
+        # through call_fn: tag check (`I can't call <v> as a function.`),
+        # arity check (`<name> expected <p> arguments, got <n>.`), then
+        # call_indirect with the uniform (env_ptr, nargs, args_ptr)
+        # signature. Builtins keep their direct calls (the checker rejects
+        # builtins as values, so they never reach _load).
         w = self.cur.w
         line = n.line
         fn = n.fn
@@ -3508,15 +3750,31 @@ class WasmCompiler:
             if name in BUILTIN_NAMES:
                 raise CompileError(
                     f"the WASM backend doesn't support '{name}' yet", line=line)
-            idx = self._func_idx(name, line)
-            for a in n.args:
-                self._gen_expr(a)
-            w.call(idx)
-            return
-        if isinstance(fn, AttrExpr):
+            self._load(name, line)
+        elif isinstance(fn, AttrExpr):
             raise CompileError(
                 "the WASM backend doesn't support method calls yet", line=line)
-        raise CompileError("the WASM backend can't call that yet", line=line)
+        else:
+            # first-class callee: index/call result, e.g. pair[1](42)
+            self._gen_expr(fn)
+        # stack: [fnval] — stash it, then build the args array (fn first,
+        # then args, matching the VM's evaluation order)
+        nargs = len(n.args)
+        fv = self.cur.new_local()
+        w.local_set(fv)
+        w.i32_const(nargs * 4)
+        w.call(self.h["alloc"])
+        ap = self.cur.new_local()
+        w.local_set(ap)
+        for i, a in enumerate(n.args):
+            w.local_get(ap)
+            self._gen_expr(a)
+            w.i32_store(i * 4)
+        w.i32_const(line)
+        w.local_get(fv)
+        w.i32_const(nargs)
+        w.local_get(ap)
+        w.call(self.h["call_fn"])
 
     def _gen_builtin_call(self, name, args, line):
         w = self.cur.w

@@ -26,7 +26,9 @@ class Env:
     def set(self,k,v): self.data[k]=v
 
 class Function:
-    def __init__(self,node,closure): self.node=node; self.closure=closure
+    def __init__(self,node,closure):
+        self.node=node; self.closure=closure
+        self._niko_fn_name=node.name
     def __call__(self,*args):
         if len(args)!=len(self.node.params): raise NikoRuntimeError(f'{self.node.name} expected {len(self.node.params)} arguments, got {len(args)}.')
         e=Env(self.closure)
@@ -193,6 +195,9 @@ def check_type(t,v,line):
 def fmt(v):
     if isinstance(v,NikoResult):
         return f'ok({fmt(v.value)})' if v.is_ok else f'error("{v.message}")'
+    # Alpha 10: first-class functions print as function "name" on every backend.
+    _fn=getattr(v,'_niko_fn_name',None)
+    if _fn is not None: return f'function "{_fn}"'
     if v is None:return 'nothing'
     if v is True:return 'yes'
     if v is False:return 'no'

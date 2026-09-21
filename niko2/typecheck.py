@@ -64,11 +64,17 @@ BUILTIN_NAMES = {
     'starts_with','ends_with','count_of','pick','write_file','append_file','read_file','read_lines','file_exists',
     'ok','error','is_ok','is_error','unwrap','unwrap_or','error_message','try_read_file','try_number'
 }
+# Alpha 10: builtins are not first-class values -- a bare builtin name is only
+# legal as the direct target of a call. `pi` is exempt: it is a number value.
+BUILTIN_FUNCS = frozenset(BUILTIN_NAMES - {'pi'})
 
 class Checker:
     def __init__(self):
         self.scopes=[{}]; self.functions={}
         self._builtin_names = set(BUILTIN_NAMES)
+        # Alpha 10: builtin names the user redefined at module level, so a
+        # bare reference resolves to the user's binding, not the builtin.
+        self._module_shadowed = set()
         for n in self._builtin_names:
             self.scopes[0][n]=FUNCTION
     def import_names(self,names):
@@ -79,7 +85,17 @@ class Checker:
         matches = difflib.get_close_matches(name, candidates, n=1, cutoff=0.45)
         return matches[0] if matches else None
     def error(self,line,msg,token=None): raise TypeErrorNiko(msg,line=line,token=token)
-    def define(self,n,t,line): self.scopes[-1][n]=t
+    def define(self,n,t,line):
+        if len(self.scopes)==1 and n in BUILTIN_FUNCS:
+            self._module_shadowed.add(n)
+        self.scopes[-1][n]=t
+    def _is_builtin_binding(self,name):
+        # True when a bare reference to `name` resolves to the builtin
+        # registration (not to a user binding shadowing it).
+        for s in reversed(self.scopes):
+            if name in s:
+                return s is self.scopes[0] and name not in self._module_shadowed
+        return False
     def lookup(self,n,line,token=None):
         for s in reversed(self.scopes):
             if n in s:return s[n]
@@ -196,7 +212,14 @@ class Checker:
             if isinstance(n.value,bool):return BOOLEAN
             if isinstance(n.value,(int,float)):return NUMBER
             return TEXT
-        if isinstance(n,NameExpr): return self.lookup(n.name,n.line,token=n.name)
+        if isinstance(n,NameExpr):
+            # Alpha 10: builtins are not values. A bare builtin name is only
+            # legal as the direct target of a call (handled in the CallExpr
+            # branch below, which never reaches this check for that position).
+            # A user binding that shadows the builtin is fine.
+            if n.name in BUILTIN_FUNCS and self._is_builtin_binding(n.name):
+                self.error(n.line,f'can\'t use the builtin "{n.name}" as a value')
+            return self.lookup(n.name,n.line,token=n.name)
         if isinstance(n,ListExpr):
             if not n.items: return LIST
             ts=[self.expr(x) for x in n.items]
@@ -233,7 +256,13 @@ class Checker:
                 if a not in (NUMBER,ANY) or b not in (NUMBER,ANY):self.error(n.line,f'{op} requires numbers')
                 return NUMBER
         if isinstance(n,CallExpr):
-            ft=self.expr(n.fn)
+            # A builtin name directly in call-target position is always fine;
+            # anywhere else (including here, via a variable) a bare builtin is
+            # rejected by the NameExpr branch above (Alpha 10).
+            if isinstance(n.fn,NameExpr) and n.fn.name in self._builtin_names:
+                ft=FUNCTION
+            else:
+                ft=self.expr(n.fn)
             arg_ts=[self.expr(a) for a in n.args]
             if isinstance(n.fn,NameExpr) and n.fn.name=='item_of' and len(arg_ts)==2:
                 # item_of(index, collection) -- the surface syntax is

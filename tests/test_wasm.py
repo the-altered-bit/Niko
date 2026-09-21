@@ -11,6 +11,9 @@ mixing yes/no with 1/0 literals to keep the VM output canonical.
 import os, pathlib, shutil, subprocess, sys, tempfile
 
 root = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(root))            # niko2 package
+sys.path.insert(0, str(root / 'tests'))  # sibling test modules
+from test_closures import CLOSURE_CASES
 node = shutil.which('node')
 
 def niko2(*args, cwd=None, input_text=None):
@@ -67,21 +70,44 @@ def test_wasm_differential():
         assert_same(src)
         print(f'ok: {name}')
 
-def test_wasm_unsupported_closure():
-    # closures over enclosing function locals are a parity gap -> CompileError
-    sys.path.insert(0, str(root))
-    from niko2.parser import parse
-    from niko2.typecheck import check
-    from niko2.backends.wasm import WasmBackend, CompileError
-    src = 'to outer:\n    set x to 1\n    to inner:\n        say x\n'
-    tree = parse(src)
-    check(tree, [])
-    try:
-        WasmBackend().compile(tree)
-    except CompileError:
-        print('ok: closure rejected')
+def test_wasm_closures():
+    # Alpha 10: the canonical closure programs from tests/test_closures.py,
+    # run through the WASM backend and compared byte-for-byte with the
+    # expected (VM-verified) output.
+    if not node:
+        print('SKIP: node.js not on PATH')
         return
-    raise AssertionError('expected CompileError for closure')
+    for name, src, expected in CLOSURE_CASES:
+        got = run_wasm(src)
+        assert got == expected, (
+            f'closure mismatch for {name}:\nWASM: {got!r}\nexpected: {expected!r}')
+        print(f'ok: closure/{name}')
+
+def run_wasm_raw(src):
+    # like run_wasm but returns the CompletedProcess (for runtime-error cases)
+    with tempfile.TemporaryDirectory() as tmp:
+        p = pathlib.Path(tmp) / 't.niko'
+        p.write_text(src, encoding='utf8')
+        return niko2('wasm', str(p), '--run')
+
+def test_wasm_call_errors():
+    # Alpha 10: runtime errors for calls through values keep the VM's wording.
+    if not node:
+        print('SKIP: node.js not on PATH')
+        return
+    r = run_wasm_raw('set r to ok(5)\nset v to unwrap(r)\nsay v(1)\n')
+    assert r.returncode != 0, 'calling a non-function should fail'
+    assert "I can't call 5 as a function." in r.stderr, r.stderr[:500]
+    print('ok: call_non_function')
+    r = run_wasm_raw('to add with a, b:\n    give back a + b\nsay add(1)\n')
+    assert r.returncode != 0, 'arity mismatch should fail'
+    assert 'add expected 2 arguments, got 1.' in r.stderr, r.stderr[:500]
+    print('ok: arity_mismatch')
+    # the checker still rejects builtins as values before the backend runs
+    r = run_wasm_raw('set f to length\n')
+    assert r.returncode != 0, 'builtin-as-value should fail'
+    assert 'can\'t use the builtin "length" as a value' in (r.stdout + r.stderr)
+    print('ok: builtin_as_value_rejected')
 
 
 STRESS_SRC = """\
@@ -166,6 +192,7 @@ def test_wasm_stress_correctness():
 
 if __name__ == '__main__':
     test_wasm_differential()
-    test_wasm_unsupported_closure()
+    test_wasm_closures()
+    test_wasm_call_errors()
     test_wasm_stress_correctness()
     print('all wasm tests passed')

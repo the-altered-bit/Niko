@@ -14,6 +14,14 @@ class FunctionCode:
     code: list
     return_type: str|None = None
     constants: list = None
+    # Alpha 10 closures: qualname is the unique module-wide key
+    # ("outer$inner"); captures are names boxed from enclosing functions.
+    qualname: str|None = None
+    captures: tuple = ()
+    nested: bool = False
+    def __post_init__(self):
+        if self.qualname is None: self.qualname = self.name
+        self.captures = tuple(self.captures)
 
 @dataclass
 class ModuleCode:

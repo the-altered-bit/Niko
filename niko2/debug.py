@@ -18,7 +18,7 @@ from pathlib import Path
 from .parser import parse
 from .typecheck import check
 from .compiler import compile_ast
-from .vm import VM, NikoRuntimeError, VMFunction, fmt
+from .vm import VM, NikoRuntimeError, VMFunction, Cell, fmt
 
 
 class _KillSignal(Exception):
@@ -185,6 +185,9 @@ class _OutputForwarder(io.TextIOBase):
 
 
 def describe_value(v):
+    # Alpha 10: captured variables live in shared Cells; show the value.
+    if isinstance(v, Cell):
+        v = v.value
     if isinstance(v, VMFunction):
         params = ', '.join(v.code.params)
         return f'function {v.code.name}({params})'
@@ -192,6 +195,8 @@ def describe_value(v):
 
 
 def type_of_value(v):
+    if isinstance(v, Cell):
+        v = v.value
     if v is None:
         return 'nothing'
     if isinstance(v, bool):

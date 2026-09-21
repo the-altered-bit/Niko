@@ -128,6 +128,28 @@ NVal *nval_error(NVal *msg_text) {
     return r;
 }
 
+NVal *nval_function(int32_t id, const char *name, int32_t nlen, NVal *env) {
+    NVal *v = nval_new(NVAL_FUNCTION);
+    v->u.fn.func_id = id;
+    v->u.fn.name = xmalloc((size_t)nlen + 1);
+    memcpy(v->u.fn.name, name, (size_t)nlen);
+    v->u.fn.name[nlen] = '\0';
+    v->u.fn.nlen = nlen;
+    v->u.fn.env = env;
+    return v;
+}
+
+/* A cell is a 1-element list: shared by pointer, so every holder of the
+ * cell sees the same current value (capture by reference). */
+NVal *nval_cell(NVal *v) {
+    NVal *c = nval_list();
+    nval_list_push(c, v);
+    return c;
+}
+
+NVal *nval_cell_get(NVal *c) { return c->u.list.items[0]; }
+void nval_cell_set(NVal *c, NVal *v) { c->u.list.items[0] = v; }
+
 /* ---------------- panic ---------------- */
 
 _Noreturn void niko_panic(int line, const char *msg) {
@@ -136,6 +158,13 @@ _Noreturn void niko_panic(int line, const char *msg) {
     else
         fprintf(stderr, "Niko error: %s\n", msg);
     exit(1);
+}
+
+_Noreturn void niko_arity_panic(const char *name, int want, int got) {
+    char msg[1024];
+    snprintf(msg, sizeof msg, "%s expected %d arguments, got %d.",
+             name, want, got);
+    niko_panic(0, msg);
 }
 
 /* ---------------- UTF-8 helpers ---------------- */
@@ -190,6 +219,7 @@ int nval_truthy(NVal *v) {
     case NVAL_LIST:    return v->u.list.len != 0;
     case NVAL_RECORD:  return v->u.rec.len != 0;
     case NVAL_RESULT:  return v->u.res.ok;
+    case NVAL_FUNCTION: return 1;   /* unreachable: checker needs booleans */
     }
     return 0;
 }
@@ -235,6 +265,7 @@ int nval_equals(NVal *a, NVal *b) {
                memcmp(ma->u.text.data, mb->u.text.data,
                       (size_t)ma->u.text.len) == 0;
     }
+    case NVAL_FUNCTION: return a == b;   /* identity, like the VM */
     }
     return 0;
 }
@@ -323,6 +354,11 @@ static void fmt_into(sbuf *b, NVal *v) {
             sb_put(b, "\")", 2);
         }
         break;
+    case NVAL_FUNCTION:
+        sb_put(b, "function \"", 10);
+        sb_put(b, v->u.fn.name, v->u.fn.nlen);
+        sb_ch(b, '"');
+        break;
     }
 }
 
@@ -333,6 +369,23 @@ NVal *nval_to_text(NVal *v) {
     NVal *t = nval_text(b.data, b.len);
     free(b.data);
     return t;
+}
+
+/* ---------------- first-class calls ---------------- */
+
+NVal *niko_call(int line, NVal *fn, int nargs, NVal **args) {
+    if (fn->tag != NVAL_FUNCTION) {
+        /* same text as the VM: value formatted with say-formatting */
+        sbuf b;
+        sb_init(&b);
+        sb_put(&b, "I can't call ", 13);
+        fmt_into(&b, fn);
+        sb_put(&b, " as a function.", 15);
+        sb_ch(&b, '\0');
+        niko_panic(line, b.data);   /* leaks b.data; we exit anyway */
+    }
+    return niko_call_dispatch(line, fn->u.fn.func_id, fn->u.fn.env,
+                              nargs, args);
 }
 
 /* ---------------- binary / unary ---------------- */

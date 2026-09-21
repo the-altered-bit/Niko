@@ -44,16 +44,32 @@ def _try_number(x):
     except NikoRuntimeError as e: return NikoResult(False,message=str(e))
 
 class Frame:
-    def __init__(self,code,env=None,name='<main>',constants=None):
+    def __init__(self,code,env=None,name='<main>',constants=None,globals=None):
         self.code=code; self.constants=constants or []; self.env={} if env is None else env; self.stack=[]; self.ip=0; self.name=name; self.iter_stack=[]
+        # Alpha 10: the module env, for names that are neither locals nor
+        # captured cells (module globals stay one shared namespace).
+        self.globals=self.env if globals is None else globals
+
+class Cell:
+    """A shared box for a captured variable (Alpha 10 closures).
+
+    Capture is by reference: the defining frame and every closure created
+    from it hold the *same* Cell object, so writes are visible everywhere.
+    """
+    __slots__=('value',)
+    def __init__(self,v): self.value=v
 
 class VMFunction:
-    def __init__(self,code,closure): self.code=code; self.closure=closure
+    def __init__(self,code,cells=None,globals_env=None):
+        self.code=code
+        self.cells=dict(cells) if cells else {}
+        self.globals_env=globals_env
+        self._niko_fn_name=code.name
     def __call__(self,*args):
         if len(args)!=len(self.code.params): raise NikoRuntimeError(f'{self.code.name} expected {len(self.code.params)} arguments, got {len(args)}.')
-        env=dict(self.closure)
+        env=dict(self.cells)
         env.update(zip(self.code.params,args))
-        vm=VM(); vm.constants=self.code.constants or []; return vm.execute_code(self.code.code,env,self.code.name,vm.constants)
+        vm=VM(); vm.constants=self.code.constants or []; return vm.execute_code(self.code.code,env,self.code.name,vm.constants,self.globals_env)
 
 class VM:
     def __init__(self): self.output=[]; self.trace_fn=None
@@ -82,22 +98,26 @@ class VM:
         'try_read_file':_try_read_file,'try_number':_try_number,
         'niko_range':niko_range}
         return b.get(name)
-    def get(self,env,name):
-        if name in env:return env[name]
+    def get(self,f,name):
+        if name in f.env:
+            v=f.env[name]; return v.value if isinstance(v,Cell) else v
+        if f.globals is not f.env and name in f.globals:
+            v=f.globals[name]; return v.value if isinstance(v,Cell) else v
         b=self.builtin(name)
         if b is not None:return b
         raise NikoRuntimeError(f'I don\'t know what "{name}" is.')
     def execute(self,module,env=None):
         env={} if env is None else env
-        # Functions are compiled separately and installed before execution.
-        # The closure must be the live `env` dict (not a copy taken mid-loop):
-        # a copy would freeze the environment before sibling functions -- and
-        # the function's own name -- had been added to it, breaking recursion
-        # and any function calling one defined later in the same module.
-        for name,fc in module.functions.items(): env[name]=VMFunction(fc,env)
+        # Alpha 10: functions are first-class values. Top-level definitions
+        # are installed as values with no captured cells; recursion (and
+        # mutual recursion) resolves through the shared globals dict, so the
+        # old "live env dict as closure" trick is gone. Nested definitions
+        # are installed by MAKE_FUNCTION at runtime, not here.
+        for name,fc in module.functions.items():
+            if not fc.nested: env[name]=VMFunction(fc,{},env)
         return self.execute_code(module.code,env,constants=module.constants)
-    def execute_code(self,code,env,name='<main>',constants=None):
-        f=Frame(code,env,name,constants if constants is not None else getattr(self,'constants',[])); frames=[f]
+    def execute_code(self,code,env,name='<main>',constants=None,globals=None):
+        f=Frame(code,env,name,constants if constants is not None else getattr(self,'constants',[]),globals); frames=[f]
         while frames:
             f=frames[-1]
             if f.ip>=len(f.code): frames.pop(); continue
@@ -109,8 +129,11 @@ class VM:
             try:
                 if op=='HALT': return None
                 if op=='PUSH_CONST': f.stack.append(self._const(a, f))
-                elif op=='LOAD': f.stack.append(self.get(f.env,a))
-                elif op=='STORE': f.env[a]=f.stack.pop()
+                elif op=='LOAD': f.stack.append(self.get(f,a))
+                elif op=='STORE':
+                    v=f.stack.pop(); c=f.env.get(a)
+                    if isinstance(c,Cell): c.value=v
+                    else: f.env[a]=v
                 elif op=='POP': f.stack.pop()
                 elif op=='SAY':
                     vals=[f.stack.pop() for _ in range(a)][::-1]; print(' '.join(fmt(x) for x in vals))
@@ -154,8 +177,9 @@ class VM:
                     args=[f.stack.pop() for _ in range(a)][::-1]; fn=f.stack.pop()
                     if isinstance(fn,VMFunction):
                         if len(args)!=len(fn.code.params): raise NikoRuntimeError(f'{fn.code.name} expected {len(fn.code.params)} arguments, got {len(args)}.')
-                        env2=dict(fn.closure); env2.update(zip(fn.code.params,args)); frames.append(Frame(fn.code.code,env2,fn.code.name,fn.code.constants or []))
-                    else: f.stack.append(fn(*args))
+                        env2=dict(fn.cells); env2.update(zip(fn.code.params,args)); frames.append(Frame(fn.code.code,env2,fn.code.name,fn.code.constants or [],fn.globals_env))
+                    elif callable(fn): f.stack.append(fn(*args))
+                    else: raise NikoRuntimeError(f"I can't call {fmt(fn)} as a function.")
                 elif op=='RETURN':
                     val=f.stack.pop(); frames.pop()
                     if not frames:return val
@@ -172,7 +196,18 @@ class VM:
                 elif op=='ITER_NEXT':
                     try:f.stack.append(next(f.iter_stack[-1]))
                     except StopIteration:f.iter_stack.pop(); f.ip=a
-                elif op=='MAKE_FUNCTION': f.stack.append(VMFunction(self._functions[a],f.env.copy()))
+                elif op=='MAKE_FUNCTION':
+                    # Alpha 10: the arg is the function's qualname. Captured
+                    # names are wrap-or-created into shared Cells in the
+                    # defining frame, so later STOREs in this frame and all
+                    # closures see the same box (capture by reference).
+                    fc=self._functions[a]; cells={}
+                    for cname in fc.captures:
+                        c=f.env.get(cname)
+                        if not isinstance(c,Cell):
+                            c=Cell(c); f.env[cname]=c
+                        cells[cname]=c
+                    f.stack.append(VMFunction(fc,cells,f.globals))
                 else: raise NikoRuntimeError(f'Unknown VM instruction {op}')
             except NikoRuntimeError: raise
             except Exception as e: raise NikoRuntimeError(f'Line {ins.line}: {e}')
