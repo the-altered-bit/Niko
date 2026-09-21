@@ -169,6 +169,13 @@ class Checker:
             if n.otherwise:
                 self.scopes.append({}); self.block(n.otherwise,return_type); self.scopes.pop()
         elif isinstance(n,UseStmt): pass
+        elif isinstance(n,ImportStmt):
+            # Alpha 13: `import "…" as alias` binds the alias to the module's
+            # export record (typed as a map; attribute access is `any`).
+            # Imports only make sense at the top of a file.
+            if len(self.scopes) > 1:
+                self.error(n.line, 'import must be at the top of the file')
+            self.define(n.alias, MAP, n.line)
         elif isinstance(n,IndexSetStmt):
             t=self.expr(n.target)
             if base_type(t) not in ('list','map') and t not in (ANY,): self.error(n.line,f'cannot assign into {t} by index/key')

@@ -105,6 +105,9 @@ class _Collector:
             t = n.type_name or _infer(n.expr)
             self.define(n.name, 'var', n.line, t)
             self.walk_expr(n.expr)
+        elif isinstance(n, ImportStmt):
+            # Alpha 13: the alias is a module value (record of exports).
+            self.define(n.alias, 'module', n.line, 'map')
         elif isinstance(n, AskStmt):
             self.define(n.name, 'var', n.line, 'number' if n.want_number else 'text')
         elif isinstance(n, ForStmt):

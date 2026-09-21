@@ -13,6 +13,30 @@ def format_parse_error(source, exc, path='<memory>'):
     return format_diagnostic(source, exc, path)
 
 
+def _parse_import(text, line_no, lines, i, ind):
+    # Alpha 13: `import "path/to/file.niko" as alias` -- top-level only.
+    rest = text[len('import '):].strip()
+    base_col = ind + 1 + len('import ')
+    if not rest or rest[0] not in '"\'':
+        raise ParseError('expected a quoted file path after import, e.g. import "math.niko" as m',
+                         line_no, col=base_col)
+    quote = rest[0]
+    end = rest.find(quote, 1)
+    if end == -1:
+        raise ParseError('unterminated file path in import', line_no, col=base_col)
+    path = rest[1:end]
+    after = rest[end + 1:].strip()
+    if not (after.startswith('as ') or after.startswith('as\t')):
+        raise ParseError('expected as ALIAS after the import path, e.g. import "math.niko" as m',
+                         line_no, col=base_col + end + 1)
+    alias = after[2:].strip()
+    if not __import__('re').match(r'^[A-Za-z_]\w*$', alias):
+        raw_after = rest[end + 1:]
+        alias_col = base_col + (end + 1) + (len(raw_after) - len(after)) + len('as ')
+        raise ParseError('import alias must be a plain name', line_no, col=alias_col)
+    return ImportStmt(line_no, path, alias), i + 1
+
+
 def _kw_col(lines, i, ind, keyword):
     """1-based column of `keyword` in the raw source line, else statement start."""
     k = lines[i].find(keyword, ind)
@@ -149,6 +173,7 @@ def parse_stmt(lines,i,ind):
         mv=_match_value_at(lines,i,ind,rest,line_no)
         if mv is not None: mexpr,j=mv; return ReturnStmt(line_no,mexpr),j
         return ReturnStmt(line_no,None if not rest else parse_expr(rest,line_no)),i+1
+    if text.startswith('import '): return _parse_import(text, line_no, lines, i, ind)
     if text.startswith('use '): return UseStmt(line_no,text[4:].strip()),i+1
     if text.startswith('ask number '):
         rest=text[11:]; pos=find_top_level(rest,' into ')

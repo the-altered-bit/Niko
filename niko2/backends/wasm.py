@@ -3926,11 +3926,10 @@ class WasmCompiler:
                 raise CompileError(
                     f"the WASM backend doesn't support '{name}' yet", line=line)
             self._load(name, line)
-        elif isinstance(fn, AttrExpr):
-            raise CompileError(
-                "the WASM backend doesn't support method calls yet", line=line)
         else:
-            # first-class callee: index/call result, e.g. pair[1](42)
+            # first-class callee: attribute/index results (e.g. m.add(2, 3)),
+            # call results, etc. -- _gen_expr leaves the value on the stack
+            # and call_fn checks the tag at runtime.
             self._gen_expr(fn)
         # stack: [fnval] — stash it, then build the args array (fn first,
         # then args, matching the VM's evaluation order)

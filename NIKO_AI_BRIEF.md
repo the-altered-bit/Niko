@@ -146,6 +146,27 @@ the same kind of value, and the match must be exhaustive — it needs
 `otherwise:` or a catch-all `when x:` as the last arm. Also usable after
 `give back` and `say`.
 
+### 3c. Modules (Niko 2 only)
+
+Big programs can split across files. `import "lib/util.niko" as u`
+(top of the file only; the path must end in `.niko` and be quoted;
+`as alias` is required) binds `u` to a record of the file's exports —
+the names set with top-level `set` and `to`. Access is qualified:
+
+```
+import "lib/util.niko" as u
+say u.shout("hello")
+```
+
+A file's top-level code runs exactly once per program, no matter how
+many files import it (import cache), and transitive imports just work.
+Importing a file in a circle (`a` imports `b` imports `a`) is a compile
+error. Errors inside an imported file are reported against that file.
+`use` (the older single-file include) can't appear inside imported
+modules. Paths resolve relative to the importing file, then the current
+folder — there's no search path yet. Importing works identically on all
+three backends.
+
 In the browser IDE, files live in `localStorage` (virtual); on the desktop they are real files.
 
 ## 5. Error messages (part of the language design)

@@ -39,6 +39,8 @@ class ReturnStmt(Node): expr:object|None
 @dataclass
 class UseStmt(Node): module:str
 @dataclass
+class ImportStmt(Node): path:str; alias:str
+@dataclass
 class MatchStmt(Node): expr:object; cases:list; otherwise:list|None=None
 @dataclass
 class MatchExpr(Node): expr:object; cases:list; otherwise:list|None=None

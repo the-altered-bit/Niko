@@ -173,7 +173,9 @@ it's formatting/diagnosing is closer to feature-complete.
   large integers lose precision exactly the way the VM's floats do.
 - **`upper`/`lower` are ASCII-only.** Non-ASCII text passes through
   unchanged.
-- **No `use` imports.** Multi-module programs can't compile to WASM yet.
+- **`import` modules work on all backends** (Alpha 13); see below. `use`
+  still isn't supported in WASM/native compilations of multi-file
+  programs — use `import` instead.
 - **No file-I/O builtins** (`read_file`, `write_file`, `append_file`,
   `read_lines`, `file_exists`, `try_read_file`). They raise `CompileError`.
 - **No method-call syntax** (`x.method(...)`); use the builtin form.
@@ -196,7 +198,8 @@ generated code). Same value model as WASM (boxed values, f64 numbers).
 - **Numbers are f64**, printed with shortest-round-trip formatting so
   `say` output matches the VM exactly.
 - **`upper`/`lower` are ASCII-only**, like WASM.
-- **No `use` imports**, no method-call syntax — same as WASM.
+- **Method-call syntax works** (Alpha 13), same as WASM. `use` imports
+  aren't supported — use `import` for multi-file programs.
 - **Closures and first-class functions work** (Alpha 10): nested `to`
   captures enclosing locals by reference; functions are values (aliases,
   arguments, return values, list/record members) — byte-identical to the
@@ -210,3 +213,17 @@ generated code). Same value model as WASM (boxed values, f64 numbers).
   these are native-only extras over WASM.
 - Needs `cc`/`gcc`/`clang` on PATH; output is a platform executable
   (no extension on POSIX, `.exe` on Windows).
+
+## Alpha 13 modules limits
+
+- **The language server is single-file.** `niko2 lsp` / `niko2 check`
+  analyze one file at a time, so go-to-definition and hover don't follow
+  `import` across files (`import` aliases check as `map` so nothing
+  breaks).
+- **No search path yet.** Module paths resolve relative to the importing
+  file's directory, then the current working directory — no stdlib
+  search path or package manager.
+- **`use` is rejected inside imported modules.** The entry file may still
+  use `use "…"`; imported modules must use `import "…" as …`.
+- **`import` must be at the top of the file** — not inside a `to` or a
+  block (checker error: `import must be at the top of the file`).

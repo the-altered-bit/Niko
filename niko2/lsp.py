@@ -29,7 +29,8 @@ VERSION = '2.0.0-alpha.7'
 
 KEYWORDS = [
     'set', 'say', 'if', 'otherwise', 'match', 'when', 'to', 'give back',
-    'for each', 'while', 'repeat', 'stop', 'skip', 'ask', 'use',
+    'for each', 'while', 'repeat', 'stop', 'skip', 'ask', 'use', 'import',
+    'as',
     'and', 'or', 'not', 'is', 'is not', 'in', 'yes', 'no', 'nothing',
 ]
 

@@ -4,7 +4,7 @@ from .parser import parse,ParseError,format_parse_error
 from .diagnostics import format_diagnostic
 from .runtime import Env,execute,NikoRuntimeError
 from .typecheck import check,TypeErrorNiko
-from .modules import ModuleLoader, VMLoader
+from .modules import ModuleLoader, VMLoader, ImportErrorNiko
 from .compiler import compile_ast, CompileError
 from .vm import VM
 from .project import init_project, find_project_root, read_manifest, collect_project_dependencies, write_lock_file
@@ -49,10 +49,38 @@ def collect_imported_names(path_or_name, seen=None):
 
 def compile_source(src,name='<memory>'):
     tree=parse(src)
-    imported=[]
     if name!='<memory>':
+        from .modules import _has_imports, prepare_program
+        if _has_imports(tree):
+            # Alpha 13: multi-file program -- resolve, check, and desugar
+            # every imported module into one Program before any backend
+            # sees it.
+            return prepare_program(Path(name), tree)
         imported=collect_imported_names(Path(name).resolve())
+    else:
+        imported=[]
     check(tree, imported); return tree
+
+def _format_error(e, src, name):
+    """Render a diagnostic against the file it belongs to.
+
+    Import errors (and parse/type errors inside imported modules) carry
+    `.path`; render the caret against that file's source, not the entry's.
+    """
+    epath=getattr(e, 'path', None) or name
+    esrc=src
+    if epath!=name:
+        try: esrc=Path(epath).read_text(encoding='utf8')
+        except OSError: pass
+    return format_diagnostic(esrc, e, epath)
+
+def _format_parse_error(e, src, name):
+    epath=getattr(e, 'path', None) or name
+    esrc=src
+    if epath!=name:
+        try: esrc=Path(epath).read_text(encoding='utf8')
+        except OSError: pass
+    return format_parse_error(esrc, e, epath)
 
 def run(src,name='<memory>'):
     try:
@@ -61,9 +89,9 @@ def run(src,name='<memory>'):
             if n.__class__.__name__=='UseStmt': loader.load_into(n.module,env,Path(name).parent if name!='<memory>' else Path('.'))
         execute([n for n in tree.body if n.__class__.__name__!='UseStmt'],env)
     except ParseError as e:
-        print(format_parse_error(src, e, name)); return 1
-    except (TypeErrorNiko,NikoRuntimeError) as e:
-        print(format_diagnostic(src, e, name)); return 1
+        print(_format_parse_error(e, src, name)); return 1
+    except (TypeErrorNiko,NikoRuntimeError,ImportErrorNiko) as e:
+        print(_format_error(e, src, name)); return 1
     return 0
 
 def main():
@@ -132,9 +160,9 @@ def main():
             tree=compile_source(src,a.file)
             wasm_bytes=WasmBackend().compile(tree)
         except ParseError as e:
-            print(format_parse_error(src, e, a.file)); return 1
-        except (TypeErrorNiko,CompileError,NikoRuntimeError,WasmCompileError) as e:
-            print(format_diagnostic(src, e, a.file)); return 1
+            print(_format_parse_error(e, src, a.file)); return 1
+        except (TypeErrorNiko,CompileError,NikoRuntimeError,WasmCompileError,ImportErrorNiko) as e:
+            print(_format_error(e, src, a.file)); return 1
         out=Path(a.output) if a.output else Path(a.file).with_suffix('.wasm')
         try: out.write_bytes(wasm_bytes)
         except OSError as e: print(f'Niko error: {e}'); return 1
@@ -159,9 +187,9 @@ def main():
             backend=NativeBackend()
             exe_bytes=backend.compile(tree)
         except ParseError as e:
-            print(format_parse_error(src, e, a.file)); return 1
-        except (TypeErrorNiko,CompileError,NikoRuntimeError,NativeCompileError) as e:
-            print(format_diagnostic(src, e, a.file)); return 1
+            print(_format_parse_error(e, src, a.file)); return 1
+        except (TypeErrorNiko,CompileError,NikoRuntimeError,NativeCompileError,ImportErrorNiko) as e:
+            print(_format_error(e, src, a.file)); return 1
         bext=backend.output_extension
         out=Path(a.output) if a.output else Path(a.file).with_suffix(bext) if bext else Path(a.file).with_suffix('')
         if a.emit_c:
@@ -219,7 +247,7 @@ def main():
         module=compile_ast(main_tree)
         vm.run_module(module,env); return 0
     except ParseError as e:
-        print(format_parse_error(src, e, a.file)); return 1
-    except (TypeErrorNiko,CompileError,NikoRuntimeError) as e:
-        print(format_diagnostic(src, e, a.file)); return 1
+        print(_format_parse_error(e, src, a.file)); return 1
+    except (TypeErrorNiko,CompileError,NikoRuntimeError,ImportErrorNiko) as e:
+        print(_format_error(e, src, a.file)); return 1
 if __name__=='__main__': main()

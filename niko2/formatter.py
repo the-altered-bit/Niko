@@ -127,6 +127,8 @@ def format_stmt(node, indent=0):
         return f'{pad}give back {format_expr(node.expr)}' if node.expr is not None else f'{pad}give back'
     if isinstance(node, UseStmt):
         return f'{pad}use {node.module!r}'
+    if isinstance(node, ImportStmt):
+        return f'{pad}import "{node.path}" as {node.alias}'
     if isinstance(node, StopStmt):
         return f'{pad}stop'
     if isinstance(node, SkipStmt):

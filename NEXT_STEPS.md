@@ -96,6 +96,25 @@ match cases in `tests/test_formatter.py`.
   `tests/niko2_cases/match_expr.niko`, `tests/test_match_expr.py`
   (checker rejections + 3-way differential, byte-identical).
   See `RELEASE_NOTES_ALPHA12.md` and `ALPHA12_DESIGN.md`.
+- **Alpha 13 is complete**: multi-file modules on ALL backends.
+  `import "path/to/file.niko" as alias` (top of file only, `.niko` suffix
+  required, `as alias` required); the alias binds to a record of the
+  module's exports (top-level `set`/`to` names) — qualified access
+  `m.add(2, 3)`, `m.factor`. Each module's top-level code runs exactly
+  once per program (import cache); transitive imports work; import cycles
+  are a compile error (`import cycle: a.niko -> b.niko -> a.niko`); errors
+  inside a module are reported against the module file. `niko2/modules.py`
+  desugars all modules into ONE Program before any backend sees it
+  (per-module wrapper functions `__import$mK` + result slots
+  `__import$mK$result`, reusing Alpha 10's closure machinery), so VM,
+  WASM, and native output is byte-identical. `use` is rejected inside
+  imported modules. Bonus: WASM gained method-call support
+  (`obj.method(...)` via the first-class callee path), and
+  `import`/`as` were added to LSP keywords + the VS Code grammar.
+  Tests: `tests/test_modules.py` (7 programs 3-way differential +
+  7 error cases). Future work: stdlib search path / package manager,
+  LSP go-to-definition across files. See `RELEASE_NOTES_ALPHA13.md` and
+  `ALPHA13_DESIGN.md`.
 
 ## Standing cautions
 
