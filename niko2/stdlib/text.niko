@@ -1,0 +1,160 @@
+# stdlib/text -- everyday text helpers.
+#
+# Import with:
+#   import "stdlib/text.niko" as text
+
+# words(s: text) -> list
+# Split on " " and drop the empty pieces.
+# example: text.words("  a  b ") -> ["a", "b"]
+to words with s: text -> list:
+    set out to []
+    for each p in split(s, " "):
+        if p is not "":
+            put p in out
+    give back out
+
+# title(s: text) -> text
+# Capitalize the first letter of every word and lowercase the rest of each
+# word. Words are runs of non-space characters; extra spaces are collapsed
+# to single spaces.
+# example: text.title("hello WORLD") -> Hello World
+to title with s: text -> text:
+    set out to []
+    for each w in words(s):
+        set low to lower(w)
+        set first to upper(item_of(1, low))
+        set rest to ""
+        set i to 2
+        while i is at most length(low):
+            set rest to rest + item_of(i, low)
+            add 1 to i
+        put first + rest in out
+    give back join(out, " ")
+
+# capitalize(s: text) -> text
+# Uppercase the first character, leave the rest unchanged. The empty
+# text stays empty.
+# example: text.capitalize("hello") -> Hello
+to capitalize with s: text -> text:
+    if s is "":
+        give back ""
+    set first to upper(item_of(1, s))
+    set rest to ""
+    set i to 2
+    while i is at most length(s):
+        set rest to rest + item_of(i, s)
+        add 1 to i
+    give back first + rest
+
+# pad_left(s: text, width: number, fill: text) -> text
+# Pad on the left with fill until the text is width characters long. Only
+# the FIRST character of fill is used. If s is already width or longer,
+# return s unchanged.
+# Preconditions: fill is not empty; width is a whole number >= 0.
+# example: text.pad_left("42", 5, "0") -> 00042
+to pad_left with s: text, width: number, fill: text -> text:
+    set f to item_of(1, fill)
+    set out to s
+    while length(out) is smaller than width:
+        set out to f + out
+    give back out
+
+# pad_right(s: text, width: number, fill: text) -> text
+# Pad on the right with fill until the text is width characters long. Only
+# the FIRST character of fill is used. If s is already width or longer,
+# return s unchanged.
+# Preconditions: fill is not empty; width is a whole number >= 0.
+# example: text.pad_right("42", 5, "0") -> 42000
+to pad_right with s: text, width: number, fill: text -> text:
+    set f to item_of(1, fill)
+    set out to s
+    while length(out) is smaller than width:
+        set out to out + f
+    give back out
+
+# repeat(s: text, n: number) -> text
+# s repeated n times. n <= 0 gives the empty text.
+# Preconditions: n is a whole number.
+# example: text.repeat("ab", 3) -> ababab
+to repeat with s: text, n: number -> text:
+    set out to ""
+    set i to 0
+    while i is smaller than n:
+        set out to out + s
+        add 1 to i
+    give back out
+
+# slugify(s: text) -> text
+# Lowercase; keep a-z and 0-9; space, "_" and "-" become "-"; every other
+# character is dropped; runs of "-" collapse to one; leading and trailing
+# "-" are stripped.
+# example: text.slugify("Hello, World!") -> hello-world
+to slugify with s: text -> text:
+    set out to ""
+    set last_dash to no
+    for each c in lower(s):
+        if has("abcdefghijklmnopqrstuvwxyz0123456789", c):
+            set out to out + c
+            set last_dash to no
+        otherwise if c is " " or c is "_" or c is "-":
+            if last_dash is no:
+                set out to out + "-"
+            set last_dash to yes
+    while starts_with(out, "-"):
+        set tmp to ""
+        set i to 2
+        while i is at most length(out):
+            set tmp to tmp + item_of(i, out)
+            add 1 to i
+        set out to tmp
+    while ends_with(out, "-") and length(out) is bigger than 0:
+        set tmp to ""
+        set i to 1
+        set last to length(out) - 1
+        while i is at most last:
+            set tmp to tmp + item_of(i, out)
+            add 1 to i
+        set out to tmp
+    give back out
+
+# lines(s: text) -> list
+# Split on newline characters.
+# example: text.lines("a\nb") -> ["a", "b"]
+to lines with s: text -> list:
+    give back split(s, "\n")
+
+# truncate(s: text, n: number) -> text
+# If s is longer than n characters, keep the first n characters and add
+# "..."; otherwise return s unchanged.
+# Preconditions: n is a whole number >= 0.
+# example: text.truncate("hello world", 5) -> hello...
+to truncate with s: text, n: number -> text:
+    if length(s) is at most n:
+        give back s
+    set out to ""
+    set i to 1
+    while i is at most n:
+        set out to out + item_of(i, s)
+        add 1 to i
+    give back out + "..."
+
+# is_blank(s: text) -> boolean
+# yes when s is empty or holds only whitespace.
+# example: text.is_blank("   ") -> yes
+to is_blank with s: text -> boolean:
+    give back trim(s) is ""
+
+# reverse_text(s: text) -> text
+# The characters of s in reverse order.
+# example: text.reverse_text("abc") -> cba
+to reverse_text with s: text -> text:
+    set out to ""
+    for each c in s:
+        set out to c + out
+    give back out
+
+# count_words(s: text) -> number
+# The number of space-separated words in s (see words).
+# example: text.count_words("a b c") -> 3
+to count_words with s: text -> number:
+    give back length(words(s))

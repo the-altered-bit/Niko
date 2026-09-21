@@ -1,0 +1,74 @@
+# stdlib/records -- small record (map) helpers.
+#
+# Import with:
+#   import "stdlib/records.niko" as records
+
+# record_keys(r: map) -> list
+# All keys of r. A tiny helper so omit can keep its `keys` parameter
+# name without shadowing the keys() builtin inside its own body.
+# example: records.record_keys({a: 1}) -> ["a"]
+to record_keys with r: map -> list:
+    give back keys(r)
+
+# merge(a: map, b: map) -> map
+# All keys of a plus all keys of b; b wins on conflicts.
+# Neither input is mutated.
+# example: records.merge({x: 1}, {x: 9, y: 2}) -> {x: 9, y: 2}
+to merge with a: map, b: map -> map:
+    set out to {}
+    for each k in keys(a):
+        set out[k] to a[k]
+    for each k in keys(b):
+        set out[k] to b[k]
+    give back out
+
+# pick_keys(r: map, keys: list) -> map
+# A new record holding only the listed keys that exist in r.
+# example: records.pick_keys({a: 1, b: 2}, ["a", "c"]) -> {a: 1}
+to pick_keys with r: map, keys: list -> map:
+    set out to {}
+    for each k in keys:
+        if has(r, k):
+            set out[k] to r[k]
+    give back out
+
+# omit(r: map, keys: list) -> map
+# A new record like r but without the listed keys.
+# example: records.omit({a: 1, b: 2}, ["b"]) -> {a: 1}
+to omit with r: map, keys: list -> map:
+    set out to {}
+    for each k in record_keys(r):
+        if not has(keys, k):
+            set out[k] to r[k]
+    give back out
+
+# get_or(r: map, key: text, default: any) -> any
+# The value at r[key] when key exists, otherwise default.
+# example: records.get_or({a: 1}, "b", 0) -> 0
+to get_or with r: map, key: text, default: any -> any:
+    if has(r, key):
+        give back r[key]
+    otherwise:
+        give back default
+
+# invert(r: map) -> map
+# Flip entries: text(value) maps back to its key.
+# Precondition: values are distinct (later keys win on clashes).
+# example: records.invert({a: "x", b: "y"}) -> {x: "a", y: "b"}
+to invert with r: map -> map:
+    set out to {}
+    for each k in keys(r):
+        set out[text(r[k])] to k
+    give back out
+
+# map_values(r: map, f: function) -> map
+# A new record with f applied to each value; keys are unchanged.
+# example:
+#   to double with n:
+#       give back n * 2
+#   records.map_values({a: 1, b: 2}, double) -> {a: 2, b: 4}
+to map_values with r: map, f: function -> map:
+    set out to {}
+    for each k in keys(r):
+        set out[k] to f(r[k])
+    give back out

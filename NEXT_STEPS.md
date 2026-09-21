@@ -115,6 +115,16 @@ match cases in `tests/test_formatter.py`.
   7 error cases). Future work: stdlib search path / package manager,
   LSP go-to-definition across files. See `RELEASE_NOTES_ALPHA13.md` and
   `ALPHA13_DESIGN.md`.
+- **Alpha 14 is complete**: Niko 2 standard library (pure-Niko `text`,
+  `math`, `lists`, `records` under `niko2/stdlib/`, `import
+  "stdlib/text.niko" as text`, byte-identical on VM/WASM/native) +
+  documented module search path (file dir → `NIKO_PATH` → bundled
+  stdlib → cwd) + docs generated from doc comments (`STDLIB.md`, kept
+  fresh by `tests/test_stdlib2.py`) + VM `CALL_BUILTIN` fix (builtin
+  name in call position always means the builtin, matching
+  checker/WASM/native). Full suite green. Package manager / registry
+  stays future work. See `RELEASE_NOTES_ALPHA14.md`, `ALPHA14_DESIGN.md`,
+  `STDLIB.md`.
 
 ## Standing cautions
 

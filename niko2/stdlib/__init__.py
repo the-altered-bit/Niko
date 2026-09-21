@@ -1,5 +1,5 @@
 """Niko standard-library registry. Alpha 5 exposes a small module API."""
-from .runtime import get_builtin
+from ..runtime import get_builtin
 
 CORE_MODULES = {
     'math': {'abs','ceil','floor','round','sqrt','pi','max','min','sum','average','random_int'},

@@ -1,0 +1,121 @@
+# stdlib/math -- small math helpers beyond the builtins.
+#
+# Import with:
+#   import "stdlib/math.niko" as math
+
+# clamp(x: number, lo: number, hi: number) -> number
+# Keep x inside [lo, hi]: values below lo become lo, values above hi
+# become hi.
+# Preconditions: lo is at most hi.
+# example: math.clamp(15, 0, 10) -> 10
+to clamp with x: number, lo: number, hi: number -> number:
+    if x is smaller than lo:
+        give back lo
+    otherwise if x is bigger than hi:
+        give back hi
+    otherwise:
+        give back x
+
+# lerp(a: number, b: number, t: number) -> number
+# Linear interpolation: a + (b - a) * t. t = 0 gives a, t = 1 gives b.
+# example: math.lerp(0, 10, 0.5) -> 5
+to lerp with a: number, b: number, t: number -> number:
+    give back a + (b - a) * t
+
+# gcd(a: number, b: number) -> number
+# Greatest common divisor via the Euclidean algorithm, computed on the
+# absolute values. gcd(0, 0) gives 0.
+# Preconditions: a and b are whole numbers.
+# example: math.gcd(12, 18) -> 6
+to gcd with a: number, b: number -> number:
+    set x to abs(a)
+    set y to abs(b)
+    while y is not 0:
+        set r to x % y
+        set x to y
+        set y to r
+    give back x
+
+# is_prime(n: number) -> boolean
+# Trial division up to the square root of n. Numbers below 2 are not prime.
+# Preconditions: n is a whole number.
+# example: math.is_prime(17) -> yes
+to is_prime with n: number -> boolean:
+    if n is smaller than 2:
+        give back no
+    set d to 2
+    while d * d is at most n and n % d is not 0:
+        add 1 to d
+    give back d * d is bigger than n
+
+# factorial(n: number) -> number
+# n! = 1 * 2 * ... * n, with 0! = 1.
+# Preconditions: n is a whole number >= 0.
+# example: math.factorial(5) -> 120
+to factorial with n: number -> number:
+    set out to 1
+    set i to 2
+    while i is at most n:
+        set out to out * i
+        add 1 to i
+    give back out
+
+# median(xs: list) -> number
+# Sort a copy of xs; with an odd count take the middle element, with an
+# even count average the two middle elements.
+# Preconditions: xs is not empty and holds numbers.
+# example: math.median([3, 1, 2]) -> 2
+to median with xs: list -> number:
+    set srt to sorted(xs)
+    set n to length(xs)
+    set total to 0
+    set count to 0
+    set i to 0
+    for each v in srt:
+        add 1 to i
+        if i * 2 is n + 1 or i * 2 is n or i * 2 is n + 2:
+            add v to total
+            add 1 to count
+    give back total / count
+
+# sign(x: number) -> number
+# -1 when x is negative, 1 when x is positive, 0 when x is zero.
+# example: math.sign(-5) -> -1
+to sign with x: number -> number:
+    if x is bigger than 0:
+        give back 1
+    otherwise if x is smaller than 0:
+        give back -1
+    otherwise:
+        give back 0
+
+# is_even(n: number) -> boolean
+# yes when n is divisible by 2.
+# Preconditions: n is a whole number.
+# example: math.is_even(4) -> yes
+to is_even with n: number -> boolean:
+    give back n % 2 is 0
+
+# is_odd(n: number) -> boolean
+# yes when n is not divisible by 2.
+# Preconditions: n is a whole number.
+# example: math.is_odd(4) -> no
+to is_odd with n: number -> boolean:
+    give back n % 2 is not 0
+
+# digits(n: number) -> list
+# The decimal digits of abs(n) as numbers, most significant first.
+# digits(0) gives [0].
+# Preconditions: n is a whole number.
+# example: math.digits(402) -> [4, 0, 2]
+to digits with n: number -> list:
+    set n to abs(n)
+    set rev to []
+    if n is 0:
+        put 0 in rev
+        give back rev
+    while n is bigger than 0:
+        set d to n % 10
+        put d in rev
+        set n to (n - d) / 10
+    give back reversed(rev)

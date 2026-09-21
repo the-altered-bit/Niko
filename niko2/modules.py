@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from .parser import parse, ParseError
 from .typecheck import check, TypeErrorNiko
@@ -143,18 +144,48 @@ def _result_name(key):
     return f'__import${key}$result'
 
 
+def stdlib_dir():
+    """Absolute path of the bundled Niko 2 standard library (niko2/stdlib/)."""
+    from . import stdlib as _stdlib_pkg
+    return Path(_stdlib_pkg.__file__).parent
+
+
+def niko_path_roots():
+    """Extra module search roots from the NIKO_PATH environment variable
+    (os.pathsep-separated). Only existing directories are used."""
+    roots = []
+    for part in os.environ.get('NIKO_PATH', '').split(os.pathsep):
+        part = part.strip()
+        if part and Path(part).is_dir():
+            roots.append(Path(part))
+    return roots
+
+
 def resolve_import(raw_path, base_dir, line, importer_path):
     """Resolve an import path to an absolute .niko file.
 
-    Relative to the importing file's directory first, then the cwd.
-    Raises ImportErrorNiko (with the importing file's line) when the path
-    is not a .niko file or cannot be found.
+    Search order (Alpha 14):
+      1. the importing file's directory,
+      2. each NIKO_PATH directory (if the env var is set),
+      3. the bundled standard library -- for paths starting with
+         ``stdlib/`` (e.g. ``import "stdlib/text.niko" as text``),
+      4. the current working directory.
+
+    A ``stdlib/`` file in the importing file's directory or on NIKO_PATH
+    shadows the bundled one. Raises ImportErrorNiko (with the importing
+    file's line) when the path is not a .niko file or cannot be found.
     """
     p = (raw_path or '').strip()
     if Path(p).suffix != '.niko':
         raise ImportErrorNiko(f'import expects a .niko file, got "{raw_path}"',
                               line=line, path=str(importer_path))
-    for cand in (Path(base_dir) / p, Path.cwd() / p):
+    rel = Path(p)
+    candidates = [Path(base_dir) / rel]
+    candidates += [root / rel for root in niko_path_roots()]
+    if rel.parts and rel.parts[0] == 'stdlib' and len(rel.parts) > 1:
+        candidates.append(stdlib_dir() / Path(*rel.parts[1:]))
+    candidates.append(Path.cwd() / rel)
+    for cand in candidates:
         if cand.is_file():
             return cand.resolve()
     raise ImportErrorNiko(f'cannot find module "{raw_path}"',

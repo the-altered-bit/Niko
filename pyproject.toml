@@ -10,3 +10,6 @@ requires-python = ">=3.10"
 
 [project.scripts]
 niko2 = "niko2.cli:main"
+
+[tool.setuptools.package-data]
+"niko2.stdlib" = ["*.niko"]

@@ -220,9 +220,10 @@ generated code). Same value model as WASM (boxed values, f64 numbers).
   analyze one file at a time, so go-to-definition and hover don't follow
   `import` across files (`import` aliases check as `map` so nothing
   breaks).
-- **No search path yet.** Module paths resolve relative to the importing
-  file's directory, then the current working directory — no stdlib
-  search path or package manager.
+- **Module search path exists; no package manager yet.** `import` resolves:
+  importing file's dir → `NIKO_PATH` dirs → bundled stdlib (`stdlib/…`
+  paths) → cwd. A local/`NIKO_PATH` `stdlib/` tree shadows the bundled
+  one. There is still no registry / package manager.
 - **`use` is rejected inside imported modules.** The entry file may still
   use `use "…"`; imported modules must use `import "…" as …`.
 - **`import` must be at the top of the file** — not inside a `to` or a

@@ -1,0 +1,134 @@
+# stdlib/lists -- handy list operations.
+#
+# Import with:
+#   import "stdlib/lists.niko" as lists
+
+# chunk(xs: list, n: number) -> list
+# Split xs into sub-lists of length n; the last one may be shorter.
+# Precondition: n >= 1.
+# example: lists.chunk([1, 2, 3, 4, 5], 2) -> [[1, 2], [3, 4], [5]]
+to chunk with xs: list, n: number -> list:
+    set out to []
+    set i to 1
+    while i is at most length(xs):
+        set piece to []
+        set j to 0
+        while j is smaller than n and i + j is at most length(xs):
+            put xs[i + j] in piece
+            set j to j + 1
+        put piece in out
+        set i to i + n
+    give back out
+
+# zip(xs: list, ys: list) -> list
+# Pair up items as [x, y] lists, stopping at the shorter input.
+# example: lists.zip([1, 2], ["a", "b", "c"]) -> [[1, "a"], [2, "b"]]
+to zip with xs: list, ys: list -> list:
+    set out to []
+    set n to length(xs)
+    if length(ys) is smaller than n:
+        set n to length(ys)
+    set i to 1
+    while i is at most n:
+        put [xs[i], ys[i]] in out
+        set i to i + 1
+    give back out
+
+# flatten(xs: list) -> list
+# One level of flattening: inner lists are spliced in, non-list
+# items are kept as-is, and empty inner lists contribute nothing.
+# example: lists.flatten([[1, 2], [3], 4]) -> [1, 2, 3, 4]
+to flatten with xs: list -> list:
+    set out to []
+    for each el in xs:
+        match el:
+            when []:
+                # Empty inner lists contribute nothing.
+                set nothing_to_add to yes
+            when [first, ...rest]:
+                put first in out
+                for each r in rest:
+                    put r in out
+            otherwise:
+                put el in out
+    give back out
+
+# take(xs: list, n: number) -> list
+# The first n items of xs, or fewer when xs is shorter than n.
+# example: lists.take([1, 2, 3], 2) -> [1, 2]
+to take with xs: list, n: number -> list:
+    set out to []
+    set i to 1
+    while i is at most n and i is at most length(xs):
+        put xs[i] in out
+        set i to i + 1
+    give back out
+
+# drop(xs: list, n: number) -> list
+# Everything after the first n items of xs.
+# example: lists.drop([1, 2, 3], 2) -> [3]
+to drop with xs: list, n: number -> list:
+    set out to []
+    set i to n + 1
+    while i is at most length(xs):
+        put xs[i] in out
+        set i to i + 1
+    give back out
+
+# pluck(xs: list, key: text) -> list
+# The value at key for each record in xs.
+# Precondition: every item of xs is a record holding key.
+# example: lists.pluck([{name: "a"}, {name: "b"}], "name") -> ["a", "b"]
+to pluck with xs: list, key: text -> list:
+    set out to []
+    for each r in xs:
+        put r[key] in out
+    give back out
+
+# group_by(xs: list, key_fn: function) -> map
+# Group items by text(key_fn(item)). Each key maps to its items in
+# first-seen order; keys follow first-seen order too.
+# example:
+#   to first_letter with s:
+#       give back item_of(1, s)
+#   lists.group_by(["apple", "avocado", "kiwi"], first_letter) -> {a: ["apple", "avocado"], k: ["kiwi"]}
+to group_by with xs: list, key_fn: function -> map:
+    set groups to {}
+    for each el in xs:
+        set k to text(key_fn(el))
+        if not has(groups, k):
+            set groups[k] to []
+        set tmp to groups[k]
+        put el in tmp
+        set groups[k] to tmp
+    give back groups
+
+# partition(xs: list, pred: function) -> list
+# [matches, non_matches]: items passing pred first, then the rest,
+# each in original order.
+# example:
+#   to is_even with n:
+#       give back n % 2 is 0
+#   lists.partition([1, 2, 3, 4], is_even) -> [[2, 4], [1, 3]]
+to partition with xs: list, pred: function -> list:
+    set hits to []
+    set misses to []
+    for each el in xs:
+        if pred(el):
+            put el in hits
+        otherwise:
+            put el in misses
+    give back [hits, misses]
+
+# frequencies(xs: list) -> map
+# Count occurrences: text(item) maps to how many times it appears.
+# example: lists.frequencies(["a", "b", "a"]) -> {a: 2, b: 1}
+to frequencies with xs: list -> map:
+    set counts to {}
+    for each el in xs:
+        set k to text(el)
+        if has(counts, k):
+            set counts[k] to counts[k] + 1
+        otherwise:
+            set counts[k] to 1
+    give back counts

@@ -140,5 +140,7 @@ Single-file `niko2 lsp`/`check` diagnostics don't follow imports
 
 ## Future (not this alpha)
 
-A stdlib search path / package manager. `import` takes only relative-or-cwd
-paths today; see NEXT_STEPS.md.
+~~A stdlib search path / package manager. `import` takes only relative-or-cwd
+paths today; see NEXT_STEPS.md.~~ Done in Alpha 14: documented search
+path (file dir → `NIKO_PATH` → bundled `stdlib/` → cwd); the package
+manager / registry is still future work.

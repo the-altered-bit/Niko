@@ -181,6 +181,11 @@ class VM:
                         f.stack.append(input(fmt(prompt)))
                 elif op=='ATTR':
                     obj=f.stack.pop(); f.stack.append(obj[a] if isinstance(obj,dict) else getattr(obj,a))
+                elif op=='CALL_BUILTIN':
+                    name,argc=a; args=[f.stack.pop() for _ in range(argc)][::-1]
+                    fn=self.builtin(name)
+                    if not callable(fn): raise NikoRuntimeError(f"'{name}' is a value, not a function.")
+                    f.stack.append(fn(*args))
                 elif op=='CALL':
                     args=[f.stack.pop() for _ in range(a)][::-1]; fn=f.stack.pop()
                     if isinstance(fn,VMFunction):

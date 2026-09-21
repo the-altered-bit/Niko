@@ -9,6 +9,7 @@ import pathlib, subprocess, sys, tempfile
 
 root = pathlib.Path(__file__).resolve().parent
 project_root = root.parent
+sys.path.insert(0, str(project_root))  # niko2 package (mirrors test_wasm.py)
 
 CLOSURE_CASES = [
     ('counter', '''\
@@ -144,11 +145,18 @@ ok_cases = [
     'say pi\n',
     'set text to "shadow"\nsay text\n',
     'set r to ok("hi")\nmatch r:\n    when ok text:\n        say text\n',
-    'to length with x:\n    give back x\nsay length(9)\n',
 ]
 for src in ok_cases:
     r = run_vm(src)
     assert r.returncode == 0, f'should pass but failed: {src!r}\n{r.stdout}{r.stderr}'
+
+# -- Alpha 14: a builtin name in direct call position always means the
+# builtin, on every backend (checker + WASM/native rule). A user binding
+# that shadows the name (here `to length`) is invisible to the call, so
+# this is a builtin call `length(9)` and fails at runtime.
+r = run_vm('to length with x:\n    give back x\nsay length(9)\n')
+assert r.returncode != 0, 'shadowed builtin call should hit the builtin'
+assert 'no len()' in (r.stdout + r.stderr) or "can't get the length" in (r.stdout + r.stderr), r.stdout + r.stderr
 
 # -- statically-known non-callables are still rejected by the checker ---------
 r = run_vm('set x to 5\nsay x(1)\n')

@@ -163,8 +163,14 @@ many files import it (import cache), and transitive imports just work.
 Importing a file in a circle (`a` imports `b` imports `a`) is a compile
 error. Errors inside an imported file are reported against that file.
 `use` (the older single-file include) can't appear inside imported
-modules. Paths resolve relative to the importing file, then the current
-folder — there's no search path yet. Importing works identically on all
+modules. Paths resolve in order: the importing file's folder, each
+`NIKO_PATH` folder, the bundled standard library (paths starting with
+`stdlib/`), then the current folder. The standard library is four
+pure-Niko modules — `import "stdlib/text.niko" as text` (text helpers),
+`import "stdlib/math.niko" as math`, `import "stdlib/lists.niko" as
+lists`, `import "stdlib/records.niko" as records` — see `STDLIB.md` for
+the full reference. A `stdlib/` folder next to your file or on
+`NIKO_PATH` shadows the bundled one. Importing works identically on all
 three backends.
 
 In the browser IDE, files live in `localStorage` (virtual); on the desktop they are real files.

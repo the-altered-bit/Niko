@@ -3,6 +3,7 @@ from .ast import *
 from .ir import IRBuilder, FunctionCode, ModuleCode
 from .diagnostics import Diagnostic
 from .closures import analyze_closures
+from .typecheck import BUILTIN_NAMES
 
 class CompileError(Diagnostic): pass
 
@@ -259,9 +260,19 @@ class Compiler:
         elif isinstance(n,IndexExpr): self.expr(n.obj,b); self.expr(n.index,b); b.emit('INDEX',line=n.line)
         elif isinstance(n,AttrExpr): self.expr(n.obj,b); b.emit('ATTR',n.name,n.line)
         elif isinstance(n,CallExpr):
-            self.expr(n.fn,b)
-            for x in n.args:self.expr(x,b)
-            b.emit('CALL',len(n.args),n.line)
+            if isinstance(n.fn,NameExpr) and n.fn.name in BUILTIN_NAMES:
+                # Alpha 14: a builtin name in direct call position always
+                # means the builtin (the checker's rule; WASM/native already
+                # compile it this way). A user binding that shadows the
+                # builtin name (a variable, or an import alias like
+                # `as text`) is invisible here, so a module's internal
+                # builtin calls can't be broken by its importer's aliases.
+                for x in n.args:self.expr(x,b)
+                b.emit('CALL_BUILTIN',(n.fn.name,len(n.args)),n.line)
+            else:
+                self.expr(n.fn,b)
+                for x in n.args:self.expr(x,b)
+                b.emit('CALL',len(n.args),n.line)
         elif isinstance(n,MatchExpr): self.match_expr(n,b)
         else: raise CompileError(f'unsupported expression {type(n).__name__}', line=n.line)
 

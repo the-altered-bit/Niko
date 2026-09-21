@@ -48,7 +48,10 @@ in lists/records (`pair[2]()`, `r["f"](1, 2)`).
 - **Builtins are not values.** A bare builtin name is only legal as the
   direct target of a call; `set f to length` is a checker error:
   `can't use the builtin "length" as a value`. (`pi` is exempt — it's a
-  number.) A user variable that shadows a builtin name still works.
+  number.) A user variable that shadows a builtin name still works as a
+  value (`set text to "shadow"` / `say text`) and for attribute access
+  (`text.title(...)`); in direct call position the builtin always wins
+  (Alpha 14 made the VM match the checker/WASM/native on this).
 
 ## How it's implemented
 
