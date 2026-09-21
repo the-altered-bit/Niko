@@ -116,7 +116,14 @@ match try_number(ask "age?"):
 Patterns, tried top to bottom, first match wins: a literal (`1`, `"quit"`,
 `yes`, `nothing`), `ok name` / `error name` (the name holds the value /
 the message), a bare name (`when d:` catches anything and names it), or
-several patterns with commas (`when "sat", "sun":`). `otherwise:` is the
+several patterns with commas (`when "sat", "sun":`). Patterns can also
+take lists apart — `when [a, b]:` (exactly two items), `when []:` (empty
+only), `when [first, ...rest]:` (head and tail) — and records —
+`when {name: n, age: a}:` (needs those keys; extra keys are fine) — nested
+as deeply as you like (`when [[a], {x: b}]:`). An arm can carry a guard:
+`when [a] if a is bigger than 10:` runs only when the pattern matches
+*and* the guard is true (the guard can use the pattern's names); a failed
+guard just tries the next arm. `otherwise:` is the
 optional fallback; with no match and no `otherwise`, the program just
 carries on. An **option** (`option<T>`) is even simpler: a value or
 `nothing` — `unwrap_or(maybe_name, 0)` gives the value or `0`.

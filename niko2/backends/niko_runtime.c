@@ -97,6 +97,10 @@ static int rec_find(NVal *r, const char *k, int32_t klen) {
     return -1;
 }
 
+int nval_record_has(NVal *r, const char *k, int32_t klen) {
+    return rec_find(r, k, klen) >= 0;
+}
+
 void nval_record_set(NVal *r, const char *k, int32_t klen, NVal *v) {
     int i = rec_find(r, k, klen);
     if (i >= 0) { r->u.rec.vals[i] = v; return; }
@@ -1331,6 +1335,14 @@ NVal *b_try_read_file(int line, NVal *p) {
 
 int32_t nval_list_len(NVal *l) { return l->u.list.len; }
 NVal *nval_list_item(NVal *l, int64_t i) { return l->u.list.items[i]; }
+NVal *nval_list_slice(NVal *l, int64_t from) {
+    NVal *out = nval_list();
+    int64_t start = from - 1;
+    if (start < 0) start = 0;
+    for (int64_t i = start; i < l->u.list.len; i++)
+        nval_list_push(out, l->u.list.items[i]);
+    return out;
+}
 
 NVal *niko_ask_val(NVal *prompt, int want_number) {
     NVal *t = nval_to_text(prompt);

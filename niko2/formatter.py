@@ -80,10 +80,11 @@ def format_stmt(node, indent=0):
         return f'{pad}while {format_expr(node.cond)}:\n' + '\n'.join(body)
     if isinstance(node, MatchStmt):
         lines = [f'{pad}match {format_expr(node.expr)}:']
-        for patterns, body in node.cases:
-            pats = ', '.join(format_pattern(p) for p in patterns)
-            lines.append(f'{pad}    when {pats}:')
-            lines.extend(format_block(body, indent + 8))
+        for case in node.cases:
+            pats = ', '.join(format_pattern(p) for p in case.patterns)
+            g = f' if {format_expr(case.guard)}' if case.guard is not None else ''
+            lines.append(f'{pad}    when {pats}{g}:')
+            lines.extend(format_block(case.body, indent + 8))
         if node.otherwise:
             lines.append(f'{pad}    otherwise:')
             lines.extend(format_block(node.otherwise, indent + 8))
@@ -121,6 +122,12 @@ def format_pattern(p):
         return f'ok {p.name}'
     if isinstance(p, MatchErr):
         return f'error {p.name}'
+    if isinstance(p, MatchRest):
+        return f'...{p.name}'
+    if isinstance(p, MatchList):
+        return '[' + ', '.join(format_pattern(i) for i in p.items) + ']'
+    if isinstance(p, MatchRecord):
+        return '{' + ', '.join(f'{k}: {format_pattern(v)}' for k, v in p.fields) + '}'
     raise ValueError(f'bad pattern {type(p).__name__}')
 
 

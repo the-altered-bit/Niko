@@ -22,7 +22,8 @@ from dataclasses import dataclass
 
 from .ast import (
     Node, FunctionDef, SetStmt, AskStmt, ForStmt, AugAssignStmt,
-    MatchBind, MatchOk, MatchErr, MatchStmt, NameExpr, CallExpr,
+    MatchBind, MatchOk, MatchErr, MatchList, MatchRest, MatchRecord,
+    MatchStmt, NameExpr, CallExpr,
     IfStmt, RepeatStmt, WhileStmt,
 )
 
@@ -48,6 +49,18 @@ def _builtin_names():
     return _BUILTIN_LIKE
 
 
+def _pattern_names(p):
+    """All names bound by a match pattern (recursive over list/record)."""
+    if isinstance(p, (MatchBind, MatchOk, MatchErr, MatchRest)):
+        yield p.name
+    elif isinstance(p, MatchList):
+        for item in p.items:
+            yield from _pattern_names(item)
+    elif isinstance(p, MatchRecord):
+        for _, sub in p.fields:
+            yield from _pattern_names(sub)
+
+
 def _stmt_children(stmt):
     """Statement lists nested directly inside stmt (not crossing FunctionDef)."""
     if isinstance(stmt, IfStmt):
@@ -58,8 +71,8 @@ def _stmt_children(stmt):
     elif isinstance(stmt, (RepeatStmt, ForStmt, WhileStmt)):
         yield stmt.body
     elif isinstance(stmt, MatchStmt):
-        for _, b in stmt.cases:
-            yield b
+        for case in stmt.cases:
+            yield case.body
         if stmt.otherwise:
             yield stmt.otherwise
 
@@ -126,11 +139,13 @@ def _refs_of_function(node):
             return
         if isinstance(s, MatchStmt):
             expr(s.expr)
-            for patterns, b in s.cases:
-                for p in patterns:
-                    if isinstance(p, (MatchBind, MatchOk, MatchErr)):
-                        out.append(('write', p.name))
-                for x in b:
+            for case in s.cases:
+                for p in case.patterns:
+                    for name in _pattern_names(p):
+                        out.append(('write', name))
+                if case.guard is not None:
+                    expr(case.guard)
+                for x in case.body:
                     stmt(x)
             if s.otherwise:
                 for x in s.otherwise:
@@ -187,10 +202,10 @@ def _bound_of(node):
         elif isinstance(s, AugAssignStmt):
             bound.add(s.name)
         elif isinstance(s, MatchStmt):
-            for patterns, _ in s.cases:
-                for p in patterns:
-                    if isinstance(p, (MatchBind, MatchOk, MatchErr)):
-                        bound.add(p.name)
+            for case in s.cases:
+                for p in case.patterns:
+                    for name in _pattern_names(p):
+                        bound.add(name)
         elif isinstance(s, FunctionDef):
             bound.add(s.name)
 

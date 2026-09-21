@@ -121,8 +121,8 @@ visible syntax, and never claim a feature is complete unless implemented
   checked against parameter annotations, and `map<K,V>` has no value-type
   inference yet.
 - Error model: `option<T>` / `result<T>` with the `ok`/`error` builtins
-  (Alpha 6 WIP2). `match` patterns don't yet include guards, list/record
-  patterns, and `match` is statement-only, not an expression (WIP3).
+  (Alpha 6 WIP2). `match` is statement-only, not an expression (WIP3);
+  guards and list/record patterns shipped in Alpha 11.
 - Full detail lives in `niko2/KNOWN_LIMITATIONS.md` — read it before planning work.
 
 ## 6. What to do next (priority order)
@@ -137,6 +137,7 @@ VS Code extension, and a DAP debugger, all tested.
 2. **Alpha 8 is done**: WebAssembly backend — `niko2 wasm <file> [-o out.wasm] [--run]`, boxed f64 value model, `tests/test_wasm.py` (differential vs VM). Limits: no file-I/O builtins, no `ask` without a host shim, no closures over enclosing function locals. See `RELEASE_NOTES_ALPHA8.md`.
 3. **Alpha 9 is done**: native backend — `niko2 native <file> [-o out] [--run] [--emit-c]`. Compiles checked AST to C (`niko2/backends/native.py`), then to a real executable via the system C compiler using `niko2/backends/niko_runtime.c/.h` (same boxed value model as WASM). Differential `tests/test_native.py` (14 programs vs VM, closure rejection, native-only file-I/O + `ask` tests). Extras over WASM: `ask` (stdin) and file builtins work natively. Limits: no `use` imports, no method-call syntax, no first-class function values, no closures over enclosing function locals, needs `cc`/`gcc`/`clang`. See `RELEASE_NOTES_ALPHA9.md`.
 4. **Alpha 10 is done**: closures + first-class functions on ALL backends (VM, WASM, native). Nested `to` captures enclosing locals by reference (shared boxes; write-through `set`); functions are values (aliases, arguments, return values, list/record members); `say f` prints `function "add"`; calling a non-function errors `I can't call 5 as a function.`; bare builtins are not values (`can't use the builtin "length" as a value`, `pi` exempt). Shared analysis in `niko2/closures.py`; VM uses `Cell` boxes; WASM adds `TAG_FUNCTION = 7` with a funcref table + `call_indirect`; native adds `NVal` tag 7. Tests: `tests/niko2_cases/closures.niko` (+`.out`), `tests/test_closures.py` (VM-side + 3-way differential VM/WASM/native, byte-identical), `tests/test_wasm.py` + `tests/test_native.py` run the 8 canonical programs. Full suite green. See `RELEASE_NOTES_ALPHA10.md`.
+5. **Alpha 11 is done**: match guards + list/record patterns on ALL backends. `when PATTERN if EXPR:` (guard checked after bindings, may use them; failed guard falls through); `[a, b]`, `[]`, `[first, ...rest]`, `{name: n, age: a}`, nested arbitrarily. New AST nodes `MatchCase`/`MatchList`/`MatchRest`/`MatchRecord`; checker types element bindings from `list<T>` and rejects patterns against statically known wrong types; VM gains tiny `IS_LIST`/`IS_RECORD`/`LIST_SLICE` opcodes with hidden `$patN` slots for nested subjects; WASM mirrors with tag/length/item helpers; native restructures `_gen_match` (bind-then-guard can't live in an `if/else if` chain) with new `nval_list_slice`/`nval_record_has` helpers. Tests: `tests/niko2_cases/match_patterns.niko` (+`.out`), `tests/test_match_patterns.py` (checker rejections + 3-way differential, byte-identical). Full suite green. See `RELEASE_NOTES_ALPHA11.md` and `ALPHA11_DESIGN.md`.
 
 Before adding new features, weigh fixing the gaps above — tooling like the
 formatter is more useful once the language surface is closer to complete.

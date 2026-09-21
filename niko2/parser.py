@@ -169,7 +169,45 @@ def parse_stmt(lines,i,ind):
     if text.startswith('match '): return parse_match(lines,i,ind)
     return ExprStmt(line_no,parse_expr(text,line_no)),i+1
 
+def _parse_record_key(s,line):
+    s=s.strip()
+    if (len(s)>=2 and s[0]==s[-1] and s[0] in "'\""):
+        return s[1:-1]
+    if __import__('re').match(r'^[A-Za-z_]\w*$',s): return s
+    raise ParseError(f'bad record pattern key "{s}"', line, token=s)
+
 def parse_pattern(s,line):
+    s=s.strip()
+    if s.startswith('[') and s.endswith(']'):
+        inner=s[1:-1].strip(); items=[]
+        if inner:
+            for e in split_top(inner):
+                e=e.strip()
+                if not e: raise ParseError('empty pattern in list', line, token=s)
+                if e.startswith('...'):
+                    name=e[3:].strip()
+                    if not __import__('re').match(r'^[A-Za-z_]\w*$',name):
+                        raise ParseError(f'bad rest name "{name}"', line, token=name)
+                    if any(isinstance(x,MatchRest) for x in items):
+                        raise ParseError('only one "...rest" allowed in a list pattern', line, token=s)
+                    items.append(MatchRest(line,name))
+                else:
+                    if items and isinstance(items[-1],MatchRest):
+                        raise ParseError('"...rest" must be the last pattern in [...]', line, token=s)
+                    items.append(parse_pattern(e,line))
+        return MatchList(line,items)
+    if s.startswith('{') and s.endswith('}'):
+        inner=s[1:-1].strip(); fields=[]
+        if inner:
+            for e in split_top(inner):
+                e=e.strip()
+                ci=find_top_level(e,':')
+                if ci==-1: raise ParseError(f'bad record pattern "{e}" -- use key: name', line, token=e)
+                key=_parse_record_key(e[:ci],line)
+                sub=e[ci+1:].strip()
+                if not sub: raise ParseError(f'record pattern key "{key}" needs a pattern after ":"', line, token=e)
+                fields.append((key,parse_pattern(sub,line)))
+        return MatchRecord(line,fields)
     m=__import__('re').match(r'ok\s+([A-Za-z_]\w*)$',s)
     if m: return MatchOk(line,m.group(1))
     m=__import__('re').match(r'error\s+([A-Za-z_]\w*)$',s)
@@ -195,9 +233,20 @@ def parse_match(lines,i,ind):
         if aind>arm_ind: raise ParseError('unexpected indentation in match', ln, col=aind+1)
         if t.startswith('when '):
             require_colon(lines[j],ln)
-            pats=[parse_pattern(p.strip(),ln) for p in split_top(t[5:-1].strip()) if p.strip()]
+            head=t[5:-1].strip(); guard=None
+            gi=find_top_level(head,' if ')
+            if gi==-1:
+                # `when [a] if:` -- `if` with no condition and no trailing space
+                gt=find_top_level(head,' if')
+                if gt!=-1 and gt+3==len(head):
+                    raise ParseError('"if" in "when" needs a condition', ln, token='if')
+            if gi!=-1:
+                gpart=head[gi+4:].strip()
+                if not gpart: raise ParseError('"if" in "when" needs a condition', ln, token='if')
+                guard=parse_expr(gpart,ln); head=head[:gi].strip()
+            pats=[parse_pattern(p.strip(),ln) for p in split_top(head) if p.strip()]
             if not pats: raise ParseError('when needs a pattern', ln, col=_kw_col(lines,j,ind,'when '))
-            body,k=child_block(lines,j+1,aind); cases.append((pats,body)); j=k
+            body,k=child_block(lines,j+1,aind); cases.append(MatchCase(ln,pats,guard,body)); j=k
         elif t=='otherwise:':
             body,k=child_block(lines,j+1,aind); otherwise=body; j=k; break
         else: raise ParseError('expected "when ..." or "otherwise:" in match', ln, col=aind+1)

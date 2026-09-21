@@ -24,7 +24,7 @@ from ..ast import (
     Node, Program, SetStmt, IndexSetStmt, AugAssignStmt, PutStmt, RemoveStmt,
     AskStmt, SayStmt, ExprStmt, IfStmt, RepeatStmt, ForStmt, WhileStmt,
     StopStmt, SkipStmt, FunctionDef, ReturnStmt, UseStmt, MatchStmt,
-    MatchLit, MatchBind, MatchOk, MatchErr,
+    MatchLit, MatchBind, MatchOk, MatchErr, MatchList, MatchRest, MatchRecord,
     CallExpr, NameExpr, LiteralExpr, ListExpr, RecordExpr, IndexExpr,
     UnaryExpr, BinaryExpr, AttrExpr,
 )
@@ -92,6 +92,22 @@ _BUILTIN_C = {
     'error_message': (1, 'b_error_message', None),
     'try_number': (1, 'b_try_number', None),
 }
+
+
+def _match_binding_names(p):
+    """Yield every name bound by match pattern p, including nested list
+    and record sub-patterns and MatchRest names (mirrors the bindings
+    performed by _match_bind, for slot declaration)."""
+    if isinstance(p, (MatchBind, MatchOk, MatchErr)):
+        yield p.name
+    elif isinstance(p, MatchRest):
+        yield p.name
+    elif isinstance(p, MatchList):
+        for item in p.items:
+            yield from _match_binding_names(item)
+    elif isinstance(p, MatchRecord):
+        for _key, subp in p.fields:
+            yield from _match_binding_names(subp)
 
 
 def _cstr(s):
@@ -177,8 +193,8 @@ class NikoCCompiler:
         elif isinstance(node, (RepeatStmt, ForStmt, WhileStmt)):
             yield from node.body
         elif isinstance(node, MatchStmt):
-            for _, b in node.cases:
-                yield from b
+            for case in node.cases:
+                yield from case.body
             if node.otherwise:
                 yield from node.otherwise
 
@@ -203,10 +219,9 @@ class NikoCCompiler:
             elif isinstance(s, AskStmt):
                 names.append(s.name)
             elif isinstance(s, MatchStmt):
-                for patterns, _ in s.cases:
-                    for p in patterns:
-                        if isinstance(p, (MatchBind, MatchOk, MatchErr)):
-                            names.append(p.name)
+                for case in s.cases:
+                    for p in case.patterns:
+                        names.extend(_match_binding_names(p))
 
         self._walk(body, visit)
         seen, out = set(), []
@@ -570,22 +585,27 @@ class NikoCCompiler:
         self._store(n.name, tf, line)
 
     def _gen_match(self, n):
-        line = n.line
+        # Per pattern (not else-chained): the guard must be evaluated after
+        # the bindings, so it cannot be part of the `if (...)` condition.
+        # First match still wins via `goto`; a failed guard falls through
+        # to the next pattern exactly like a failed test.
         ts = self._tmp()
         self._emit(f'NVal *{ts} = {self.gen_expr(n.expr)};')
         exits = []
-        for patterns, body in n.cases:
-            first = True
-            for p in patterns:
-                kw = 'if' if first else 'else if'
-                first = False
-                self._emit(f'{kw} ({self._match_test(p, ts, p.line)}) {{')
+        for case in n.cases:
+            for p in case.patterns:
+                self._emit(f'if ({self._match_test(p, ts, p.line)}) {{')
                 self._match_bind(p, ts, p.line)
-                for s in body:
+                if case.guard is not None:
+                    self._emit(
+                        f'if (nval_truthy({self.gen_expr(case.guard)})) {{')
+                for s in case.body:
                     self.gen_stmt(s)
                 te = self._tmp()
                 self._emit(f'goto match_end_{te};')
                 exits.append(te)
+                if case.guard is not None:
+                    self._emit('}')
                 self._emit('}')
         if n.otherwise:
             self._emit('{')
@@ -594,9 +614,15 @@ class NikoCCompiler:
             self._emit('}')
         for te in exits:
             self._emit(f'match_end_{te}: ;')
-        _ = line
 
     def _match_test(self, p, ts, line):
+        # Return a C int expression testing pattern p against the NVal* C
+        # expression `ts`. `&&` short-circuits left to right, mirroring the
+        # VM's test order (tag, length/key checks, then element sub-patterns
+        # in order). Nested subjects are read into fresh `NVal *` temps
+        # (declared via _emit before the test runs) with the extraction
+        # guarded by the preceding checks, so a failed check never reads
+        # out of bounds or panics on a missing key.
         if isinstance(p, MatchLit):
             lit = self._gen_literal(p.value, line)
             return f'nval_truthy(nval_binary({line}, 6, {ts}, {lit}))'
@@ -606,15 +632,69 @@ class NikoCCompiler:
             return f'nval_truthy(b_is_ok({line}, {ts}))'
         if isinstance(p, MatchErr):
             return f'nval_truthy(b_is_error({line}, {ts}))'
+        if isinstance(p, MatchList):
+            nfixed = sum(1 for i in p.items if not isinstance(i, MatchRest))
+            cmp = '>=' if nfixed != len(p.items) else '=='
+            parts = [f'{ts}->tag == NVAL_LIST',
+                     f'nval_list_len({ts}) {cmp} {nfixed}']
+            for i, item in enumerate(p.items):
+                if isinstance(item, MatchRest):
+                    continue
+                sub = self._tmp()
+                self._emit(f'NVal *{sub};')
+                subtest = self._match_test(item, sub, item.line)
+                parts.append(
+                    f'(({sub} = nval_list_item({ts}, {i})), {subtest})')
+            return ' && '.join(parts)
+        if isinstance(p, MatchRecord):
+            parts = [f'{ts}->tag == NVAL_RECORD']
+            for key, subp in p.fields:
+                kb = key.encode('utf-8')
+                sub = self._tmp()
+                self._emit(f'NVal *{sub};')
+                get = (f'nval_index_get({subp.line}, {ts}, '
+                       f'nval_text({_cstr(key)}, {len(kb)}))')
+                subtest = self._match_test(subp, sub, subp.line)
+                parts.append(
+                    f'(nval_record_has({ts}, {_cstr(key)}, {len(kb)})'
+                    f' && (({sub} = {get}), {subtest}))')
+            return ' && '.join(parts)
         raise CompileError(f'bad pattern {type(p).__name__}', line=line)
 
     def _match_bind(self, p, ts, line):
+        # Bind pattern p against the NVal* C expression `ts`. Only called
+        # after the test passed, so element/key extraction cannot fail.
+        # Mirrors the VM's match_bind: elements in order, recursion into
+        # nested sub-patterns (a repeated name binds left to right).
         if isinstance(p, MatchBind):
             self._store(p.name, ts, line)
         elif isinstance(p, MatchOk):
             self._store(p.name, f'b_unwrap({line}, {ts})', line)
         elif isinstance(p, MatchErr):
             self._store(p.name, f'b_error_message({line}, {ts})', line)
+        elif isinstance(p, MatchLit):
+            pass
+        elif isinstance(p, MatchList):
+            for i, item in enumerate(p.items):
+                sub = self._tmp()
+                if isinstance(item, MatchRest):
+                    self._emit(
+                        f'NVal *{sub} = nval_list_slice({ts}, {i + 1});')
+                    self._store(item.name, sub, item.line)
+                else:
+                    self._emit(
+                        f'NVal *{sub} = nval_list_item({ts}, {i});')
+                    self._match_bind(item, sub, item.line)
+        elif isinstance(p, MatchRecord):
+            for key, subp in p.fields:
+                kb = key.encode('utf-8')
+                sub = self._tmp()
+                self._emit(
+                    f'NVal *{sub} = nval_index_get({subp.line}, {ts}, '
+                    f'nval_text({_cstr(key)}, {len(kb)}));')
+                self._match_bind(subp, sub, subp.line)
+        else:
+            raise CompileError(f'bad pattern {type(p).__name__}', line=line)
 
     # -- functions / main ----------------------------------------------
     def _gen_function_body(self, node, info):

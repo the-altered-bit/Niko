@@ -81,6 +81,13 @@ match cases in `tests/test_formatter.py`.
   `tests/niko2_cases/closures.niko`, `tests/test_closures.py` (3-way
   differential), `tests/test_wasm.py`, `tests/test_native.py`. See
   `RELEASE_NOTES_ALPHA10.md`.
+- **Alpha 11 is complete**: match guards (`when PATTERN if EXPR:`, checked
+  after bindings, failed guard falls through) + list patterns (`[a, b]`,
+  `[]`, `[first, ...rest]`) + record patterns (`{name: n, age: a}`), nested
+  arbitrarily, on ALL backends (VM, WASM, native) with byte-identical
+  output. Tests: `tests/niko2_cases/match_patterns.niko`,
+  `tests/test_match_patterns.py` (checker rejections + 3-way differential).
+  See `RELEASE_NOTES_ALPHA11.md` and `ALPHA11_DESIGN.md`.
 
 ## Standing cautions
 

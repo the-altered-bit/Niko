@@ -58,6 +58,7 @@ NVal *nval_list(void);
 void  nval_list_push(NVal *l, NVal *v);
 NVal *nval_record(void);
 void  nval_record_set(NVal *r, const char *k, int32_t klen, NVal *v);
+int   nval_record_has(NVal *r, const char *k, int32_t klen); /* key present? */
 NVal *nval_ok(NVal *v);
 NVal *nval_error(NVal *msg_text);          /* msg must be a text value */
 NVal *nval_function(int32_t id, const char *name, int32_t nlen, NVal *env);
@@ -96,7 +97,10 @@ void  niko_say(int argc, NVal **argv);    /* space-joined, trailing \n */
 NVal *niko_ask(const char *prompt, int32_t plen, int want_number);
 NVal *niko_ask_val(NVal *prompt, int want_number);
 int32_t nval_list_len(NVal *l);
-NVal *nval_list_item(NVal *l, int64_t i);
+NVal *nval_list_item(NVal *l, int64_t i);      /* 0-based, no bounds check */
+NVal *nval_list_slice(NVal *l, int64_t from); /* 1-based `from`, like Niko
+                                                 indexing: fresh list of
+                                                 items[from-1:] */
 
 /* -- builtins: every one takes the Niko source line first ----------- */
 NVal *b_length(int line, NVal *x);

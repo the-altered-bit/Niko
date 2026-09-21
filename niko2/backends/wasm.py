@@ -17,6 +17,7 @@ from ..ast import (
     StopStmt, SkipStmt, ReturnStmt, UseStmt, MatchStmt, FunctionDef,
     CallExpr, NameExpr, LiteralExpr, ListExpr, RecordExpr, IndexExpr,
     UnaryExpr, BinaryExpr, AttrExpr, MatchLit, MatchBind, MatchOk, MatchErr,
+    MatchList, MatchRest, MatchRecord,
 )
 from ..compiler import CompileError
 from ..typecheck import BUILTIN_NAMES
@@ -1152,24 +1153,20 @@ class WasmCompiler:
 
     def _h_py_str(self):
         # py_str(v, quoted) -> text value with Python str() semantics,
-        # used by join. quoted=1 quotes text values (inside lists/records).
+        # used by text() and join. quoted=1 quotes text values (inside
+        # lists/records). Numbers use fmt_num: integer-valued floats render
+        # as plain integers, matching the VM's text() on ints, the native
+        # backend, and say. (WASM numbers are uniformly f64, so the VM's
+        # int/float distinction — text(20)="20" vs text(20.0)="20.0" — is
+        # not representable; the integer rendering wins.)
         f = self._helper("py_str", [I32, I32], [I32])
         w = f.w
-        tag = f.new_local(); fv = f.new_local(F64); t = f.new_local()
+        tag = f.new_local(); fv = f.new_local(F64)
         w.local_get(0); w.i32_load(0); w.local_set(tag)
-        # number: integer-valued -> fmt + ".0", else fmt
+        # number
         w.local_get(tag); w.i32_const(TAG_NUMBER); w.i32_eq()
         l = w.if_()
         w.local_get(0); w.f64_load(4); w.local_set(fv)
-        w.local_get(fv); w.local_get(fv); w.f64_trunc(); w.f64_eq()
-        w.local_get(fv); w.f64_abs(); w.f64_const(1e15); w.f64_lt()
-        w.i32_and()
-        l2 = w.if_()
-        w.i32_const(SCRATCH); w.local_get(fv); w.call(self.imp["fmt_num"])
-        w.call(self.h["make_text"]); w.local_set(t)
-        w.local_get(t); w.i32_const(self.text_val(".0"))
-        w.call(self.h["text_concat"]); w.return_()
-        w.end()
         w.i32_const(SCRATCH); w.local_get(fv); w.call(self.imp["fmt_num"])
         w.call(self.h["make_text"]); w.return_()
         w.end()
@@ -2101,7 +2098,8 @@ class WasmCompiler:
         w.unreachable()
 
     def _b_text(self):
-        # text(x) is Python str(x): 4.0 -> "4.0", yes -> "True", nothing -> "None"
+        # text(x) is Python str(x): yes -> "True", nothing -> "None";
+        # integer-valued numbers render without ".0" (see _h_py_str).
         f = self._bh("text"); w = f.w
         w.local_get(1); w.i32_const(0); w.call(self.h["py_str"])
 
@@ -3277,8 +3275,8 @@ class WasmCompiler:
         elif isinstance(n, (RepeatStmt, ForStmt, WhileStmt)):
             yield n.body
         elif isinstance(n, MatchStmt):
-            for _, b in n.cases:
-                yield b
+            for case in n.cases:
+                yield case.body
             if n.otherwise:
                 yield n.otherwise
 
@@ -3543,37 +3541,170 @@ class WasmCompiler:
         self._gen_expr(n.expr)
         subj = self.cur.new_local(); w.local_set(subj)
         end = w.block()
-        for patterns, body in n.cases:
-            for p in patterns:
-                if isinstance(p, MatchLit):
-                    w.local_get(subj)
-                    self._push_literal(p.value, p.line)
-                    w.call(self.h["equals"])
-                elif isinstance(p, MatchBind):
-                    w.i32_const(1)
-                elif isinstance(p, MatchOk):
-                    w.local_get(subj); w.i32_load(0); w.i32_const(TAG_RESULT); w.i32_eq()
-                    w.local_get(subj); w.i32_load(4); w.i32_const(1); w.i32_eq()
-                    w.i32_and()
-                elif isinstance(p, MatchErr):
-                    w.local_get(subj); w.i32_load(0); w.i32_const(TAG_RESULT); w.i32_eq()
-                    w.local_get(subj); w.i32_load(4); w.i32_const(0); w.i32_eq()
-                    w.i32_and()
-                else:
-                    raise CompileError("bad pattern", line=p.line)
-                l = w.if_()
-                if isinstance(p, MatchBind):
-                    w.local_get(subj)
-                    self._store(p.name, p.line)
-                elif isinstance(p, (MatchOk, MatchErr)):
-                    w.local_get(subj); w.i32_load(8)
-                    self._store(p.name, p.line)
-                self._gen_block(body)
-                w.br(end)
-                w.end()
+        for case in n.cases:
+            for p in case.patterns:
+                self._gen_match_arm(p, subj, 0, end, case)
         if n.otherwise:
             self._gen_block(n.otherwise)
         w.end()
+
+    def _gen_match_arm(self, p, slot, depth, end, case):
+        # Alpha 11: guards + list/record patterns. Each test condition opens
+        # a nested if_ (short-circuiting exactly like the VM's JUMP_IF_FALSE
+        # chain); at the innermost point the bindings are performed, then the
+        # guard (if any) runs in its own if_, then the body. A failed test or
+        # guard simply falls out of the nested ifs to the next pattern.
+        w = self.cur.w
+        opened = [0]
+
+        def cond(emit):
+            emit()
+            w.if_()
+            opened[0] += 1
+
+        self._pat_test(p, slot, depth, cond)
+        self._pat_bind(p, slot, depth)
+        if case.guard is not None:
+            self._gen_expr(case.guard)
+            w.call(self.h["truthy"])
+            w.if_()
+            self._gen_block(case.body)
+            w.br(end)
+            w.end()
+        else:
+            self._gen_block(case.body)
+            w.br(end)
+        for _ in range(opened[0]):
+            w.end()
+
+    def _pat_test(self, p, slot, depth, cond):
+        # Emit the test for pattern p against the value in WASM local
+        # `slot`. Each condition is passed to cond(), which emits it and
+        # opens a nested if_. Sub-values for nested patterns are stored into
+        # fresh temp locals by always-true conditions so the stores only run
+        # after the enclosing checks passed.
+        w = self.cur.w
+        if isinstance(p, MatchLit):
+            def c(p=p, slot=slot):
+                w.local_get(slot)
+                self._push_literal(p.value, p.line)
+                w.call(self.h["equals"])
+            cond(c)
+        elif isinstance(p, MatchBind):
+            pass
+        elif isinstance(p, MatchOk):
+            def c(slot=slot):
+                w.local_get(slot); w.i32_load(0); w.i32_const(TAG_RESULT); w.i32_eq()
+                w.local_get(slot); w.i32_load(4); w.i32_const(1); w.i32_eq()
+                w.i32_and()
+            cond(c)
+        elif isinstance(p, MatchErr):
+            def c(slot=slot):
+                w.local_get(slot); w.i32_load(0); w.i32_const(TAG_RESULT); w.i32_eq()
+                w.local_get(slot); w.i32_load(4); w.i32_const(0); w.i32_eq()
+                w.i32_and()
+            cond(c)
+        elif isinstance(p, MatchList):
+            nfixed = sum(1 for i in p.items if not isinstance(i, MatchRest))
+            has_rest = nfixed != len(p.items)
+
+            def ctag(slot=slot):
+                w.local_get(slot); w.i32_load(0); w.i32_const(TAG_LIST); w.i32_eq()
+            cond(ctag)
+
+            def clen(slot=slot, nfixed=nfixed, has_rest=has_rest):
+                w.local_get(slot); w.call(self.h["list_len"])
+                w.i32_const(nfixed)
+                if has_rest:
+                    w.i32_ge_u()
+                else:
+                    w.i32_eq()
+            cond(clen)
+            for i, item in enumerate(p.items):
+                if isinstance(item, MatchRest):
+                    continue
+                sub = self.cur.new_local()
+
+                def cstore(slot=slot, i=i, sub=sub):
+                    w.local_get(slot); w.i32_const(i); w.call(self.h["list_get0"])
+                    w.local_set(sub)
+                    w.i32_const(1)
+                cond(cstore)
+                self._pat_test(item, sub, depth + 1, cond)
+        elif isinstance(p, MatchRecord):
+            def ctag(slot=slot):
+                w.local_get(slot); w.i32_load(0); w.i32_const(TAG_RECORD); w.i32_eq()
+            cond(ctag)
+            for key, subp in p.fields:
+                sub = self.cur.new_local()
+
+                def chas(slot=slot, key=key):
+                    w.local_get(slot)
+                    w.i32_const(self.text_val(key))
+                    w.call(self.h["record_find"])
+                    w.i32_const(0); w.i32_ge_s()
+                cond(chas)
+
+                def cget(p=p, slot=slot, key=key, sub=sub):
+                    w.i32_const(p.line); w.local_get(slot)
+                    w.i32_const(self.text_val(key))
+                    w.call(self.h["record_get"])
+                    w.local_set(sub)
+                    w.i32_const(1)
+                cond(cget)
+                self._pat_test(subp, sub, depth + 1, cond)
+        else:
+            raise CompileError("bad pattern", line=p.line)
+
+    def _pat_bind(self, p, slot, depth):
+        # Perform the bindings for pattern p, whose subject value is in WASM
+        # local `slot`. Only called after the test passed.
+        w = self.cur.w
+        if isinstance(p, MatchBind):
+            w.local_get(slot)
+            self._store(p.name, p.line)
+        elif isinstance(p, (MatchOk, MatchErr)):
+            w.local_get(slot); w.i32_load(8)
+            self._store(p.name, p.line)
+        elif isinstance(p, MatchLit):
+            pass
+        elif isinstance(p, MatchList):
+            for i, item in enumerate(p.items):
+                if isinstance(item, MatchRest):
+                    self._gen_list_slice(slot, i)
+                    self._store(item.name, p.line)
+                else:
+                    w.local_get(slot); w.i32_const(i); w.call(self.h["list_get0"])
+                    sub = self.cur.new_local(); w.local_set(sub)
+                    self._pat_bind(item, sub, depth + 1)
+        elif isinstance(p, MatchRecord):
+            for key, subp in p.fields:
+                w.i32_const(p.line); w.local_get(slot)
+                w.i32_const(self.text_val(key))
+                w.call(self.h["record_get"])
+                sub = self.cur.new_local(); w.local_set(sub)
+                self._pat_bind(subp, sub, depth + 1)
+        else:
+            raise CompileError("bad pattern", line=p.line)
+
+    def _gen_list_slice(self, slot, start):
+        # Push list[slot][start:] (0-based start) as a fresh list value.
+        w = self.cur.w
+        w.call(self.h["list_new"])
+        out = self.cur.new_local(); w.local_set(out)
+        w.local_get(slot); w.call(self.h["list_len"])
+        n = self.cur.new_local(); w.local_set(n)
+        i = self.cur.new_local(); w.i32_const(start); w.local_set(i)
+        brk = w.block(); top = w.loop()
+        w.local_get(i); w.local_get(n); w.i32_ge_u(); w.br_if(brk)
+        w.local_get(out)
+        w.local_get(slot); w.local_get(i); w.call(self.h["list_get0"])
+        w.call(self.h["list_push"])
+        w.drop()
+        w.local_get(i); w.i32_const(1); w.i32_add(); w.local_set(i)
+        w.br(top)
+        w.end(); w.end()
+        w.local_get(out)
 
     def _capture_cell(self, info, cname):
         """Push the cell pointer for captured name `cname` (used when a

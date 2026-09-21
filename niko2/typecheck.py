@@ -156,10 +156,13 @@ class Checker:
             self.scopes.append({}); self.define(n.name,elem,n.line);self.block(n.body,return_type);self.scopes.pop()
         elif isinstance(n,MatchStmt):
             t=self.expr(n.expr)
-            for patterns,body in n.cases:
+            for case in n.cases:
                 self.scopes.append({})
-                for p in patterns: self.match_pat(p,t,n.line)
-                self.block(body,return_type)
+                for p in case.patterns: self.match_pat(p,t,n.line)
+                if case.guard is not None:
+                    g=self.expr(case.guard)
+                    if g not in (BOOLEAN,ANY): self.error(case.guard.line,f'when guard must be boolean, got {g}')
+                self.block(case.body,return_type)
                 self.scopes.pop()
             if n.otherwise:
                 self.scopes.append({}); self.block(n.otherwise,return_type); self.scopes.pop()
@@ -186,10 +189,13 @@ class Checker:
             self.expr(n.prompt); self.define(n.name,NUMBER if n.want_number else TEXT,n.line)
         elif isinstance(n,MatchStmt):
             t=self.expr(n.expr)
-            for patterns,body in n.cases:
+            for case in n.cases:
                 self.scopes.append({})
-                for p in patterns: self.match_pat(p,t,n.line)
-                self.block(body,return_type)
+                for p in case.patterns: self.match_pat(p,t,n.line)
+                if case.guard is not None:
+                    g=self.expr(case.guard)
+                    if g not in (BOOLEAN,ANY): self.error(case.guard.line,f'when guard must be boolean, got {g}')
+                self.block(case.body,return_type)
                 self.scopes.pop()
             if n.otherwise:
                 self.scopes.append({}); self.block(n.otherwise,return_type); self.scopes.pop()
@@ -205,7 +211,21 @@ class Checker:
             if t not in (ANY,) and not (isinstance(t,Type) and t.name=='result'):
                 self.error(line,f'cannot match "error" against {t}')
             self.define(p.name,TEXT,line)
-        # MatchLit binds nothing
+        elif isinstance(p,MatchList):
+            if t not in (ANY,) and base_type(t)!='list':
+                self.error(line,f'cannot match [...] against {t}')
+            elem=t.arg if (isinstance(t,Type) and t.name=='list' and t.arg is not None) else ANY
+            for item in p.items:
+                if isinstance(item,MatchRest):
+                    self.define(item.name,Type('list',elem),line)
+                else:
+                    self.match_pat(item,elem,line)
+        elif isinstance(p,MatchRecord):
+            if t not in (ANY,) and base_type(t)!='map':
+                self.error(line,f'cannot match '+'{...}'+f' against {t}')
+            for _,sub in p.fields:
+                self.match_pat(sub,ANY,line)
+        # MatchLit and MatchRest (handled by MatchList) bind nothing here
     def expr(self,n):
         if isinstance(n,LiteralExpr):
             if n.value is None:return NOTHING

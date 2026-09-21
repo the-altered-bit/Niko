@@ -1,0 +1,96 @@
+match [3, 1]:
+    when [a, b] if a is bigger than b:
+        say "a wins"
+    when [a, b]:
+        say "b wins or tie"
+    otherwise:
+        say "no match"
+match [1, 3]:
+    when [a, b] if a is bigger than b:
+        say "a wins"
+    when [a, b]:
+        say "b wins or tie"
+    otherwise:
+        say "no match"
+
+to describe with v:
+    match v:
+        when [a] if a is bigger than 10:
+            say "big " + text(a)
+        when [a]:
+            say "small " + text(a)
+        otherwise:
+            say "not a one-list"
+describe([20])
+describe([5])
+describe("x")
+
+match [1, 2]:
+    when []:
+        say "empty"
+    when [a, b]:
+        say text(a + b)
+match []:
+    when []:
+        say "empty"
+    otherwise:
+        say "not empty"
+match [[1, 2], 3]:
+    when [[a, b], c]:
+        say text(a) + text(b) + text(c)
+    otherwise:
+        say "no"
+match [7, 8, 9, 10]:
+    when [first, ...rest]:
+        say text(first) + ":" + text(length(rest))
+    otherwise:
+        say "no"
+match [5]:
+    when [...all]:
+        say "all=" + text(length(all))
+match [1]:
+    when [first, ...rest]:
+        say text(first) + ":" + text(length(rest))
+match []:
+    when [first, ...rest]:
+        say "matched"
+    otherwise:
+        say "empty falls through"
+match [ok(7)]:
+    when [ok v]:
+        say "ok " + text(v)
+    otherwise:
+        say "no"
+
+match {name: "Casper", age: 30, city: "Kochi"}:
+    when {name: n, age: a} if a is at least 18:
+        say n + " adult"
+    when {name: n}:
+        say n + " minor"
+    otherwise:
+        say "no"
+match {name: "Bo"}:
+    when {name: n, age: a}:
+        say n + " has age"
+    when {name: n}:
+        say n + " no age"
+match {a: [1, 2]}:
+    when {a: [x, ...rest]}:
+        say text(x) + "+" + text(length(rest))
+    otherwise:
+        say "no"
+
+to classify with x:
+    match x:
+        when [a, b], {k: v}:
+            say "shape"
+        otherwise:
+            say "other"
+classify([1, 2])
+classify({k: 9})
+classify(42)
+match 1:
+    when 1, 2 if no:
+        say "never"
+    when 1:
+        say "one"

@@ -87,6 +87,18 @@ class _Collector:
         for x in body:
             self.stmt(x)
 
+    def _define_pattern(self, p):
+        if isinstance(p, (MatchBind, MatchOk, MatchErr, MatchRest)):
+            kind = 'match binding'
+            t = 'text' if isinstance(p, MatchErr) else 'unknown'
+            self.define(p.name, 'var', p.line, t, kind)
+        elif isinstance(p, MatchList):
+            for item in p.items:
+                self._define_pattern(item)
+        elif isinstance(p, MatchRecord):
+            for _, sub in p.fields:
+                self._define_pattern(sub)
+
     def stmt(self, n):
         self._note(n)
         if isinstance(n, SetStmt):
@@ -113,13 +125,12 @@ class _Collector:
             self.stack.pop()
         elif isinstance(n, MatchStmt):
             self.walk_expr(n.expr)
-            for patterns, body in n.cases:
-                for p in patterns:
-                    if isinstance(p, (MatchBind, MatchOk, MatchErr)):
-                        kind = 'match binding'
-                        t = 'unknown' if isinstance(p, MatchBind) else ('text' if isinstance(p, MatchErr) else 'unknown')
-                        self.define(p.name, 'var', p.line, t, kind)
-                self.block(body)
+            for case in n.cases:
+                for p in case.patterns:
+                    self._define_pattern(p)
+                if case.guard is not None:
+                    self.walk_expr(case.guard)
+                self.block(case.body)
             if n.otherwise:
                 self.block(n.otherwise)
         elif isinstance(n, IfStmt):

@@ -41,6 +41,8 @@ class UseStmt(Node): module:str
 @dataclass
 class MatchStmt(Node): expr:object; cases:list; otherwise:list|None=None
 @dataclass
+class MatchCase(Node): patterns:list; guard:object|None=None; body:list=None
+@dataclass
 class MatchLit(Node): value:object
 @dataclass
 class MatchBind(Node): name:str
@@ -48,6 +50,12 @@ class MatchBind(Node): name:str
 class MatchOk(Node): name:str
 @dataclass
 class MatchErr(Node): name:str
+@dataclass
+class MatchList(Node): items:list
+@dataclass
+class MatchRest(Node): name:str
+@dataclass
+class MatchRecord(Node): fields:list
 @dataclass
 class CallExpr(Node): fn:object; args:list
 @dataclass

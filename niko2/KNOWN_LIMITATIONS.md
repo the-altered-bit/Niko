@@ -67,16 +67,23 @@ implementation.
   value-based path. `unwrap` on an error re-raises the message itself.
 - `match` statement with `when` arms and optional `otherwise:`.
   Patterns: literals, `ok name` / `error name` destructuring, bare-name
-  bindings, comma-separated alternatives. First match wins; the subject
-  is evaluated once; no match + no `otherwise` just continues.
-  The checker types bindings and rejects `ok`/`error` patterns against
-  statically known non-results. The compiler desugars to existing jumps
-  plus `is_ok`/`unwrap` calls — no new VM opcodes.
-- Not yet: match guards, list/record patterns, `match` as an expression,
-  `some()` constructor (options are just `T | nothing`).
+  bindings, comma-separated alternatives, **guards** (`when PATTERN if EXPR:`),
+  **list patterns** (`[a, b]`, `[]`, `[first, ...rest]`), and **record
+  patterns** (`{name: n, age: a}`), nested arbitrarily. First match wins;
+  the subject is evaluated once; per arm the order is pattern test →
+  bindings → guard → body, and a failed guard falls through like a failed
+  match. No match + no `otherwise` just continues.
+  The checker types bindings (list elements from `list<T>`, `...rest` as
+  `list<T>`) and rejects list/record/`ok`/`error` patterns against
+  statically known wrong types. The compiler desugars to jumps plus
+  `is_ok`/`unwrap` calls and three tiny opcodes (`IS_LIST`, `IS_RECORD`,
+  `LIST_SLICE`) — no new VM opcodes for the classic patterns.
+- Not yet: `match` as an expression, `some()` constructor (options are
+  just `T | nothing`).
 - Caution: the compiler stores the match subject in a hidden `$match`
-  slot. User code cannot name `$`, so this is safe, but a future backend
-  should use a real temp register instead of a magic name.
+  slot (nested pattern subjects in `$patN` slots). User code cannot name
+  `$`, so this is safe, but a future backend should use real temp
+  registers instead of magic names.
 
 ## What *does* work today (see tests/niko2_cases/)
 `set` (typed and untyped), `say`, `if`/`otherwise if`/`otherwise`,

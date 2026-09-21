@@ -102,48 +102,113 @@ class Compiler:
 
     def match_stmt(self,n,b):
         # The subject is evaluated once into $match; each pattern is tried in
-        # order and the first one that matches runs its body. No new opcodes:
-        # tests reuse == and the is_ok/is_error builtins, and bindings reuse
-        # unwrap/error_message.
+        # order and the first one that matches (and whose guard, if any,
+        # holds) runs its body. Bindings happen before the guard so the
+        # guard can reference them; a failed guard falls through to the
+        # next pattern exactly like a failed test.
         self.expr(n.expr,b); b.emit('STORE','$match',n.line)
         exits=[]
-        for patterns,body in n.cases:
-            for p in patterns:
-                jf=self.match_test(p,b)
-                self.match_bind(p,b)
-                for x in body:self.stmt(x,b)
-                exits.append(b.emit('JUMP',None,n.line)); b.patch(jf,len(b.code))
+        for case in n.cases:
+            for p in case.patterns:
+                fails=[]
+                self._test_fails(p,b,'$match',0,fails)
+                self.match_bind(p,b,'$match',0)
+                if case.guard is not None:
+                    self.expr(case.guard,b)
+                    fails.append(b.emit('JUMP_IF_FALSE',None,case.guard.line))
+                for x in case.body:self.stmt(x,b)
+                exits.append(b.emit('JUMP',None,n.line))
+                for f_ in fails: b.patch(f_,len(b.code))
         if n.otherwise:
             for x in n.otherwise:self.stmt(x,b)
         end=len(b.code)
         for p in exits:b.patch(p,end)
 
-    def match_test(self,p,b):
-        # Leaves yes/no on the stack; returns the JUMP_IF_FALSE patch point.
+    def _test_fails(self,p,b,slot,depth,fails):
+        # Emits the test for pattern p against the value in hidden slot
+        # `slot`. Appends JUMP_IF_FALSE patch points (all patched to the
+        # "pattern did not match" label) to `fails`. Nested subject values
+        # live in $pat{depth+1} slots -- not valid user identifiers, so they
+        # can never be captured or referenced.
         if isinstance(p,MatchLit):
-            b.emit('LOAD','$match',p.line)
+            b.emit('LOAD',slot,p.line)
             b.emit('PUSH_CONST',b.const(p.value,p.line),p.line)
             b.emit('BINARY','==',p.line)
+            fails.append(b.emit('JUMP_IF_FALSE',None,p.line))
         elif isinstance(p,MatchBind):
-            b.emit('PUSH_CONST',b.const(True,p.line),p.line)
+            pass
         elif isinstance(p,MatchOk):
-            b.emit('LOAD','is_ok',p.line); b.emit('LOAD','$match',p.line)
+            b.emit('LOAD','is_ok',p.line); b.emit('LOAD',slot,p.line)
             b.emit('CALL',1,p.line)
+            fails.append(b.emit('JUMP_IF_FALSE',None,p.line))
         elif isinstance(p,MatchErr):
-            b.emit('LOAD','is_error',p.line); b.emit('LOAD','$match',p.line)
+            b.emit('LOAD','is_error',p.line); b.emit('LOAD',slot,p.line)
             b.emit('CALL',1,p.line)
+            fails.append(b.emit('JUMP_IF_FALSE',None,p.line))
+        elif isinstance(p,MatchList):
+            nfixed=sum(1 for i in p.items if not isinstance(i,MatchRest))
+            has_rest=nfixed!=len(p.items)
+            b.emit('LOAD',slot,p.line); b.emit('IS_LIST',None,p.line)
+            fails.append(b.emit('JUMP_IF_FALSE',None,p.line))
+            b.emit('LOAD','length',p.line); b.emit('LOAD',slot,p.line)
+            b.emit('CALL',1,p.line)
+            b.emit('PUSH_CONST',b.const(nfixed,p.line),p.line)
+            b.emit('BINARY','>=' if has_rest else '==',p.line)
+            fails.append(b.emit('JUMP_IF_FALSE',None,p.line))
+            for i,item in enumerate(p.items):
+                if isinstance(item,MatchRest): continue
+                sub=f'$pat{depth+1}'
+                b.emit('LOAD',slot,p.line)
+                b.emit('PUSH_CONST',b.const(i+1,p.line),p.line)
+                b.emit('INDEX',line=p.line); b.emit('STORE',sub,p.line)
+                self._test_fails(item,b,sub,depth+1,fails)
+        elif isinstance(p,MatchRecord):
+            b.emit('LOAD',slot,p.line); b.emit('IS_RECORD',None,p.line)
+            fails.append(b.emit('JUMP_IF_FALSE',None,p.line))
+            for key,subp in p.fields:
+                b.emit('LOAD','has',p.line); b.emit('LOAD',slot,p.line)
+                b.emit('PUSH_CONST',b.const(key,p.line),p.line)
+                b.emit('CALL',2,p.line)
+                fails.append(b.emit('JUMP_IF_FALSE',None,p.line))
+                sub=f'$pat{depth+1}'
+                b.emit('LOAD',slot,p.line)
+                b.emit('PUSH_CONST',b.const(key,p.line),p.line)
+                b.emit('INDEX',line=p.line); b.emit('STORE',sub,p.line)
+                self._test_fails(subp,b,sub,depth+1,fails)
         else: raise CompileError(f'bad pattern {type(p).__name__}', line=p.line)
-        return b.emit('JUMP_IF_FALSE',None,p.line)
 
-    def match_bind(self,p,b):
+    def match_bind(self,p,b,slot,depth):
+        # Performs the bindings for pattern p, whose subject value is in
+        # hidden slot `slot`. Only called after the test passed.
         if isinstance(p,MatchBind):
-            b.emit('LOAD','$match',p.line); b.emit('STORE',p.name,p.line)
+            b.emit('LOAD',slot,p.line); b.emit('STORE',p.name,p.line)
         elif isinstance(p,MatchOk):
-            b.emit('LOAD','unwrap',p.line); b.emit('LOAD','$match',p.line)
+            b.emit('LOAD','unwrap',p.line); b.emit('LOAD',slot,p.line)
             b.emit('CALL',1,p.line); b.emit('STORE',p.name,p.line)
         elif isinstance(p,MatchErr):
-            b.emit('LOAD','error_message',p.line); b.emit('LOAD','$match',p.line)
+            b.emit('LOAD','error_message',p.line); b.emit('LOAD',slot,p.line)
             b.emit('CALL',1,p.line); b.emit('STORE',p.name,p.line)
+        elif isinstance(p,MatchLit):
+            pass
+        elif isinstance(p,MatchList):
+            for i,item in enumerate(p.items):
+                b.emit('LOAD',slot,p.line)
+                b.emit('PUSH_CONST',b.const(i+1,p.line),p.line)
+                if isinstance(item,MatchRest):
+                    b.emit('LIST_SLICE',None,p.line)
+                    b.emit('STORE',item.name,p.line)
+                else:
+                    sub=f'$pat{depth+1}'
+                    b.emit('INDEX',line=p.line); b.emit('STORE',sub,p.line)
+                    self.match_bind(item,b,sub,depth+1)
+        elif isinstance(p,MatchRecord):
+            for key,subp in p.fields:
+                sub=f'$pat{depth+1}'
+                b.emit('LOAD',slot,p.line)
+                b.emit('PUSH_CONST',b.const(key,p.line),p.line)
+                b.emit('INDEX',line=p.line); b.emit('STORE',sub,p.line)
+                self.match_bind(subp,b,sub,depth+1)
+        else: raise CompileError(f'bad pattern {type(p).__name__}', line=p.line)
 
     def expr(self,n,b):
         if isinstance(n,LiteralExpr): b.emit('PUSH_CONST',b.const(n.value,n.line),n.line)

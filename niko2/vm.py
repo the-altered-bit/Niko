@@ -159,6 +159,14 @@ class VM:
                     val=f.stack.pop(); lst=f.stack.pop()
                     if not isinstance(lst,list): raise NikoRuntimeError('"remove ... from" needs a list.')
                     if val in lst: lst.remove(val)
+                elif op=='IS_LIST':
+                    f.stack.append(isinstance(f.stack.pop(),list))
+                elif op=='IS_RECORD':
+                    f.stack.append(isinstance(f.stack.pop(),dict))
+                elif op=='LIST_SLICE':
+                    start=f.stack.pop(); obj=f.stack.pop()
+                    if not isinstance(obj,list): raise NikoRuntimeError('pattern rest needs a list.')
+                    f.stack.append(obj[int(start)-1:])
                 elif op=='INPUT':
                     prompt=f.stack.pop()
                     if a:  # ask number: keep asking until a number parses
