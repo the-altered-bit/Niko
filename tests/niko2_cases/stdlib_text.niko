@@ -1,0 +1,7 @@
+say starts_with("hello", "he")
+say ends_with("hello", "lo")
+say starts_with("hello", "lo")
+say ends_with("hi", "hello")
+say count_of("hello", "l")
+say count_of([1, 2, 2, 3], 2)
+say count_of("aaa", "aa")

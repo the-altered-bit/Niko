@@ -1,0 +1,9 @@
+for each i in numbers 1 to 3:
+    for each j in numbers 1 to 3:
+        if j is 2:
+            skip
+        if i is 3:
+            stop
+        say i, j
+for each n in numbers 5 to 1:
+    say n

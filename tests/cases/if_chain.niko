@@ -1,0 +1,10 @@
+if yes:
+    say 1
+otherwise:
+    say 2
+if no:
+    say 3
+otherwise if yes:
+    say 4
+otherwise:
+    say 5

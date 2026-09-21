@@ -1,0 +1,5 @@
+set xs to [1,2,3,2]
+remove 2 from xs
+say xs
+remove 9 from xs
+say xs, length of xs

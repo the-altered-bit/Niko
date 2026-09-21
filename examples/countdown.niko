@@ -1,0 +1,7 @@
+# Countdown with a pause
+set count to 5
+while count is bigger than 0:
+    say count
+    sleep(1)
+    take 1 from count
+say "Liftoff!"

@@ -1,0 +1,12 @@
+set total to 0
+set log to []
+to bump with n:
+    add n to total
+    put n in log
+bump(2)
+bump(5)
+say total, log
+to local_only:
+    set total2 to 1
+    give back total2
+say local_only()

@@ -1,0 +1,22 @@
+set r1 to ok(42)
+say r1
+say is_ok(r1)
+say is_error(r1)
+say unwrap(r1)
+set r2 to error("boom")
+say r2
+say is_error(r2)
+say unwrap_or(r2, 0)
+say error_message(r2)
+set maybe: option<number> to 5
+say unwrap_or(maybe, 0)
+set none: option<number> to nothing
+say unwrap_or(none, 0)
+set t1 to try_number("7")
+say unwrap(t1)
+set t2 to try_number("xx")
+say is_error(t2)
+say t2
+set f1 to try_read_file("missing-file.txt")
+say is_error(f1)
+say f1

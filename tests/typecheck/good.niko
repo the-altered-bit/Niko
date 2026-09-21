@@ -1,0 +1,6 @@
+set age: number to 25
+set name: text to "Niko"
+to add with a: number, b: number -> number:
+    give back a + b
+set result: number to add(2, 3)
+say name, result

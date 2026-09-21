@@ -1,0 +1,2 @@
+to double with x: number -> number:
+    give back x * 2

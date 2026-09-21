@@ -1,0 +1,2 @@
+to square with x: number -> number:
+    give back x * x

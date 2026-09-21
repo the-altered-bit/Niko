@@ -1,0 +1,51 @@
+set x to 2
+match x:
+    when 1:
+        say "one"
+    when 2, 3:
+        say "two or three"
+    otherwise:
+        say "other"
+match "quit":
+    when "quit":
+        say "bye"
+    otherwise:
+        say "keep going"
+match try_number("abc"):
+    when ok n:
+        say "got " + text(n)
+    when error msg:
+        say "failed: " + msg
+match try_number("9"):
+    when ok n:
+        say "nine is " + text(n)
+    when error msg:
+        say "failed"
+match nothing:
+    when nothing:
+        say "is nothing"
+    when v:
+        say "bound"
+set day to "sat"
+match day:
+    when "sat", "sun":
+        say "weekend"
+    when d:
+        say "weekday: " + d
+match ok([1, 2]):
+    when ok pair:
+        say pair
+    otherwise:
+        say "no pair"
+match 99:
+    when 1:
+        say "one"
+match ok(1):
+    when ok a:
+        match a:
+            when 1:
+                say "nested one"
+            otherwise:
+                say "nested other"
+    otherwise:
+        say "outer other"

@@ -1,0 +1,216 @@
+{
+  "nikoir_format": "1",
+  "engine_version": "2.0.0-alpha.5",
+  "constants": [
+    "Niko",
+    3,
+    "Hello from",
+    "Niko is growing.",
+    20,
+    22,
+    42,
+    "The answer is",
+    "The answer is not 42"
+  ],
+  "code": [
+    {
+      "op": "PUSH_CONST",
+      "arg": 0,
+      "line": 2
+    },
+    {
+      "op": "STORE",
+      "arg": "name",
+      "line": 2
+    },
+    {
+      "op": "PUSH_CONST",
+      "arg": 1,
+      "line": 3
+    },
+    {
+      "op": "STORE",
+      "arg": "count",
+      "line": 3
+    },
+    {
+      "op": "PUSH_CONST",
+      "arg": 2,
+      "line": 4
+    },
+    {
+      "op": "LOAD",
+      "arg": "name",
+      "line": 4
+    },
+    {
+      "op": "SAY",
+      "arg": 2,
+      "line": 4
+    },
+    {
+      "op": "LOAD",
+      "arg": "count",
+      "line": 5
+    },
+    {
+      "op": "ITER_REPEAT",
+      "arg": null,
+      "line": 5
+    },
+    {
+      "op": "REPEAT_NEXT",
+      "arg": 13,
+      "line": 5
+    },
+    {
+      "op": "PUSH_CONST",
+      "arg": 3,
+      "line": 6
+    },
+    {
+      "op": "SAY",
+      "arg": 1,
+      "line": 6
+    },
+    {
+      "op": "REPEAT_BACK",
+      "arg": 9,
+      "line": 5
+    },
+    {
+      "op": "MAKE_FUNCTION",
+      "arg": "add",
+      "line": 8
+    },
+    {
+      "op": "STORE",
+      "arg": "add",
+      "line": 8
+    },
+    {
+      "op": "LOAD",
+      "arg": "add",
+      "line": 11
+    },
+    {
+      "op": "PUSH_CONST",
+      "arg": 4,
+      "line": 11
+    },
+    {
+      "op": "PUSH_CONST",
+      "arg": 5,
+      "line": 11
+    },
+    {
+      "op": "CALL",
+      "arg": 2,
+      "line": 11
+    },
+    {
+      "op": "STORE",
+      "arg": "answer",
+      "line": 11
+    },
+    {
+      "op": "LOAD",
+      "arg": "answer",
+      "line": 12
+    },
+    {
+      "op": "PUSH_CONST",
+      "arg": 6,
+      "line": 12
+    },
+    {
+      "op": "BINARY",
+      "arg": "is",
+      "line": 12
+    },
+    {
+      "op": "JUMP_IF_FALSE",
+      "arg": 28,
+      "line": 12
+    },
+    {
+      "op": "PUSH_CONST",
+      "arg": 7,
+      "line": 13
+    },
+    {
+      "op": "LOAD",
+      "arg": "answer",
+      "line": 13
+    },
+    {
+      "op": "SAY",
+      "arg": 2,
+      "line": 13
+    },
+    {
+      "op": "JUMP",
+      "arg": 30,
+      "line": 12
+    },
+    {
+      "op": "PUSH_CONST",
+      "arg": 8,
+      "line": 15
+    },
+    {
+      "op": "SAY",
+      "arg": 1,
+      "line": 15
+    },
+    {
+      "op": "HALT",
+      "arg": null,
+      "line": 1
+    }
+  ],
+  "functions": {
+    "add": {
+      "params": [
+        "a",
+        "b"
+      ],
+      "return_type": "number",
+      "constants": [
+        null
+      ],
+      "code": [
+        {
+          "op": "LOAD",
+          "arg": "a",
+          "line": 9
+        },
+        {
+          "op": "LOAD",
+          "arg": "b",
+          "line": 9
+        },
+        {
+          "op": "BINARY",
+          "arg": "+",
+          "line": 9
+        },
+        {
+          "op": "RETURN",
+          "arg": null,
+          "line": 9
+        },
+        {
+          "op": "PUSH_CONST",
+          "arg": 0,
+          "line": 8
+        },
+        {
+          "op": "RETURN",
+          "arg": null,
+          "line": 8
+        }
+      ]
+    }
+  }
+}

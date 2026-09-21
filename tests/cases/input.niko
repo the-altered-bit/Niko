@@ -1,0 +1,3 @@
+ask "Name? " into name
+ask number "Age? " into age
+say name, "is", age + 1, "next year"

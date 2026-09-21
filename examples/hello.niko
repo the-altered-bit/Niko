@@ -1,0 +1,13 @@
+# Welcome to Niko! Press Run (or Ctrl+Enter) to try it.
+# Niko reads like English. Lines starting with # are notes.
+
+say "Hello, world!"
+
+ask "What is your name? " into name
+say "Nice to meet you,", name + "!"
+
+to double with x:
+    give back x * 2
+
+for each n in numbers 1 to 5:
+    say n, "doubled is", double(n)

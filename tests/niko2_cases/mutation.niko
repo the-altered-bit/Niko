@@ -1,0 +1,18 @@
+set nums to [1, 2, 3]
+put 4 in nums
+say nums
+remove 2 from nums
+say nums
+
+set total to 10
+add 5 to total
+say total
+take 3 from total
+say total
+
+set item 1 of nums to 99
+say nums
+
+set person to {"name": "Niko", "age": 2}
+set person["age"] to 3
+say person

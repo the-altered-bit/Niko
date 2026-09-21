@@ -1,0 +1,1 @@
+say length of split("a b c", " "), item 2 of split("a b c", " ")

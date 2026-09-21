@@ -1,0 +1,15 @@
+# Niko 2.0
+set name: text to "Niko"
+set count: number to 3
+say "Hello from", name
+repeat count times:
+    say "Niko is growing."
+
+to add with a: number, b: number -> number:
+    give back a + b
+
+set answer: number to add(20, 22)
+if answer is 42:
+    say "The answer is", answer
+otherwise:
+    say "The answer is not 42"

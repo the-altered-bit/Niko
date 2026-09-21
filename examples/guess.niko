@@ -1,0 +1,15 @@
+# Guess the number
+set secret to random 1 to 100
+set tries to 0
+say "I'm thinking of a number from 1 to 100."
+
+while yes:
+    ask number "Your guess? " into guess
+    add 1 to tries
+    if guess is smaller than secret:
+        say "Too low!"
+    otherwise if guess is bigger than secret:
+        say "Too high!"
+    otherwise:
+        say "You got it in", tries, "tries!"
+        stop

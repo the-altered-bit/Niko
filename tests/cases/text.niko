@@ -1,0 +1,4 @@
+set s to "Hello"
+say upper(s), lower(s), length of s, s + " " + "world", "n=" + text(5)
+say split("a b c", " "), join(["x", "y"], "-")
+say item 1 of s, reversed([1, 2, 3])

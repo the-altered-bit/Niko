@@ -1,0 +1,15 @@
+set nums: list<number> to [1, 2, 3]
+set total: number to 0
+for each n in nums:
+    set total to total + n
+say total
+say item_of(1, nums)
+say nums[2]
+set first: number to item_of(2, nums)
+say first
+put 4 in nums
+say nums
+set grid: list<list<number>> to [[1, 2], [3]]
+say grid[0]
+set mixed to [1, "a"]
+say mixed

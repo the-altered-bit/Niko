@@ -1,0 +1,3 @@
+use "math_helpers.niko"
+set answer: number to square(9)
+say answer

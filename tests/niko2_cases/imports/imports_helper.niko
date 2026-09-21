@@ -1,0 +1,4 @@
+use "imports_inner.niko"
+
+to multiply with x: number -> number:
+    give back double(x)

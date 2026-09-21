@@ -1,0 +1,15 @@
+ok(42)
+yes
+no
+42
+error("boom")
+yes
+0
+boom
+5
+0
+7
+yes
+error("I can't turn 'xx' into a number.")
+yes
+error("I couldn't find the file "missing-file.txt".")

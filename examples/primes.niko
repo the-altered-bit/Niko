@@ -1,0 +1,16 @@
+# Prime numbers
+to is_prime with n:
+    if n is smaller than 2:
+        give back no
+    set d to 2
+    while d * d is at most n:
+        if n % d is 0:
+            give back no
+        add 1 to d
+    give back yes
+
+set primes to []
+for each n in numbers 1 to 50:
+    if is_prime(n):
+        put n in primes
+say "Primes up to 50:", primes

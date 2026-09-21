@@ -1,0 +1,12 @@
+# Working with lists
+set shopping to ["milk", "eggs", "bread"]
+put "apples" in shopping
+say "I need", length of shopping, "things:"
+for each thing in shopping:
+    say "-", thing
+
+set wanted to "eggs"
+if wanted is in shopping:
+    say "Don't forget the", wanted
+say "Sorted:", sorted(shopping)
+say "First item:", item 1 of shopping

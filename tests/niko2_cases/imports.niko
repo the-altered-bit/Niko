@@ -1,0 +1,3 @@
+use "imports/imports_helper.niko"
+set answer: number to multiply(21)
+say answer

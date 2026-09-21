@@ -1,0 +1,7 @@
+set pet to {"name": "Niko", "age": 2}
+say pet["name"]
+set pet["age"] to 3
+for each k in keys(pet):
+    say k, pet[k]
+say pet
+say "name" is in pet

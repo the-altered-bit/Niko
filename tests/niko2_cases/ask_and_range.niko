@@ -1,0 +1,7 @@
+ask "What is your name? " into name
+say "Hello,", name
+ask number "How old are you? " into age
+say "In 5 years you'll be", age + 5
+
+for each x in numbers 1 to 5:
+    say x

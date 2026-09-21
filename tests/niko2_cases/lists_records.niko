@@ -1,0 +1,7 @@
+set nums to [1, 2, 3, 4]
+say sum(nums)
+say length(nums)
+say 2 of nums
+set person to {"name": "Niko", "age": 2}
+say person["name"]
+say person.age

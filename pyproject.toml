@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "niko-language"
+version = "2.0.0a1"
+description = "Niko programming language - Niko 2 compiler foundation"
+requires-python = ">=3.10"
+
+[project.scripts]
+niko2 = "niko2.cli:main"

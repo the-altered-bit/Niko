@@ -1,0 +1,5 @@
+write_file("notes.txt", "one\ntwo\n")
+append_file("notes.txt", "three\n")
+say file_exists("notes.txt"), file_exists("nope.txt")
+say read_lines("notes.txt")
+say length of read_file("notes.txt")

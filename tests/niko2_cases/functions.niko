@@ -1,0 +1,7 @@
+to factorial with n: number -> number:
+    if n is at most 1:
+        give back 1
+    give back n * factorial(n - 1)
+
+say factorial(5)
+say factorial(0)

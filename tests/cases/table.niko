@@ -1,0 +1,4 @@
+# Times table
+ask number "Which table? " into n
+for each i in numbers 1 to 10:
+    say n, "x", i, "=", n * i

@@ -1,0 +1,5 @@
+name = "niko-language"
+version = "2.0.0-alpha.4"
+entry = "examples/hello_v2.niko"
+
+[dependencies]

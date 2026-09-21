@@ -1,0 +1,6 @@
+to is_palindrome with word:
+    set letters to split(word, "")
+    give back join(reversed(letters), "") is word
+
+say is_palindrome("level")
+say is_palindrome("niko")

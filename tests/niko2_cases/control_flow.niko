@@ -1,0 +1,12 @@
+set n: number to 0
+while n is smaller than 3:
+    say "while", n
+    set n to n + 1
+
+for each x in [10, 20, 30]:
+    if x is 20:
+        say "found twenty"
+    otherwise if x is 10:
+        say "found ten"
+    otherwise:
+        say "other", x

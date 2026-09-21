@@ -1,0 +1,19 @@
+# Functions and lists
+to factorial with n:
+    if n is at most 1:
+        give back 1
+    give back n * factorial(n - 1)
+
+to fibonacci with count:
+    set a to 0
+    set b to 1
+    set result to []
+    repeat count times:
+        put a in result
+        set next to a + b
+        set a to b
+        set b to next
+    give back result
+
+say "5! =", factorial(5)
+say "Fibonacci:", fibonacci(10)

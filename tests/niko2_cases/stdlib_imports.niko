@@ -1,0 +1,5 @@
+use "math"
+use "text"
+set x: number to abs(-9)
+say x
+say upper("niko")
