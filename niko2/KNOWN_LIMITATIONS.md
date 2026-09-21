@@ -178,7 +178,14 @@ it's formatting/diagnosing is closer to feature-complete.
   programs — use `import` instead.
 - **No file-I/O builtins** (`read_file`, `write_file`, `append_file`,
   `read_lines`, `file_exists`, `try_read_file`). They raise `CompileError`.
-- **No method-call syntax** (`x.method(...)`); use the builtin form.
+- **Method calls work** (Alpha 13 added `x.method(...)` via the
+  first-class callee path).
+- **`skip` inside a `match` arm inside a loop can hang** (WASM only; VM and
+  native are fine). `when []: skip` inside a `for`/`while` body enters an
+  infinite loop under node. Repro: a `for` loop whose body is
+  `match <val>:` with a `skip` arm that fires. Needs a compiler fix in a
+  future sprint; `stdlib/lists.niko` works around it (see `flatten`'s
+  comment).
 - **Closures and first-class functions work** (Alpha 10): nested `to`
   captures enclosing locals by reference, `set f to add` aliases functions,
   functions pass as arguments, return from functions, and live in
