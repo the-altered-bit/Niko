@@ -83,7 +83,89 @@ def test_wasm_unsupported_closure():
         return
     raise AssertionError('expected CompileError for closure')
 
+
+STRESS_SRC = """\
+say "hello"
+set x to 1 + 2 * 3
+say x
+say 4.5
+say 10 / 4
+say 2 ** 8
+say yes
+say no
+say nothing
+set name to "world"
+say "hi " + name
+say length("hello")
+say upper("abc")
+say 1 is smaller than 2
+say 5 is 5
+if x is 7:
+    say "seven"
+otherwise:
+    say "not seven"
+set total to 0
+for each i in [1, 2, 3, 4, 5]:
+    set total to total + i
+say total
+set r to {"a": 1, "b": 2}
+say r["a"]
+say r.a
+to add with a: number, b: number -> number:
+    give back a + b
+say add(3, 4)
+say sorted([3, 1, 2])
+say reversed("abc")
+say 1 + 2 is 3
+set n to 0
+while n is smaller than 3:
+    say n
+    set n to n + 1
+"""
+
+STRESS_EXPECTED = """\
+hello
+7
+4.5
+2.5
+256
+yes
+no
+nothing
+hi world
+5
+ABC
+yes
+yes
+seven
+15
+1
+1
+7
+[1, 2, 3]
+["c", "b", "a"]
+yes
+0
+1
+2
+"""
+
+def test_wasm_stress_correctness():
+    # WASM-only (not differential): this program mixes yes/no with 1/0
+    # literals, which trips the VM's known constant-pool dedup bug
+    # (True == 1, False == 0 in `constants.index`). The WASM backend
+    # prints the correct values: `say yes` -> "yes", `say n` (n = 0) -> "0".
+    # Added 2026-09-21 after a 36-line stress program was verified
+    # output-by-output against the VM.
+    if not node:
+        print('SKIP: node.js not on PATH')
+        return
+    got = run_wasm(STRESS_SRC)
+    assert got == STRESS_EXPECTED, f'stress mismatch:\nWASM: {got!r}\nexpected: {STRESS_EXPECTED!r}'
+    print('ok: stress_correctness')
+
 if __name__ == '__main__':
     test_wasm_differential()
     test_wasm_unsupported_closure()
+    test_wasm_stress_correctness()
     print('all wasm tests passed')
