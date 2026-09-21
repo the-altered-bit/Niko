@@ -84,12 +84,23 @@ def find_top_level(s, needle):
         i+=1
     return -1
 
+def _match_value_at(lines,i,ind,rest,line_no):
+    # If `rest` is a whole `match EXPR:` value, parse the match expression and
+    # its arms. Returns (MatchExpr, j) or None.
+    v=rest.strip()
+    if v.startswith('match ') and v.endswith(':'):
+        return parse_match_value(lines,i,ind,v,line_no)
+    return None
+
 def parse_stmt(lines,i,ind):
     line_no=i+1; text=lines[i].strip()
     if text.startswith('set '):
         rest=text[4:]
         m=__import__('re').match(r'([A-Za-z_]\w*)(?::\s*([A-Za-z_]\w*(?:<[^<>]*(?:<[^<>]*>[^<>]*)*>)?))?\s+to\s+(.+)$',rest)
-        if m: return SetStmt(line_no,m.group(1),parse_expr(m.group(3),line_no),m.group(2)),i+1
+        if m:
+            mv=_match_value_at(lines,i,ind,m.group(3),line_no)
+            if mv is not None: mexpr,j=mv; return SetStmt(line_no,m.group(1),mexpr,m.group(2)),j
+            return SetStmt(line_no,m.group(1),parse_expr(m.group(3),line_no),m.group(2)),i+1
         # Not a plain `set NAME[: type] to VALUE` -- try an indexed/keyed
         # target: `set item N of LIST to VALUE` or `set NAME[KEY] to VALUE`.
         pos=find_top_level(rest,' to ')
@@ -127,11 +138,17 @@ def parse_stmt(lines,i,ind):
             raise ParseError('"take ... from" needs a plain variable name', line_no, col=ind+1+5+pos+6+lead)
         return AugAssignStmt(line_no,name,'-',parse_expr(rest[:pos].strip(),line_no)),i+1
     if text.startswith('say') and (len(text)==3 or text[3].isspace()):
-        rest=text[3:].strip(); return SayStmt(line_no, [] if not rest else [parse_expr(x,line_no) for x in split_top(rest)]),i+1
+        rest=text[3:].strip()
+        mv=_match_value_at(lines,i,ind,rest,line_no)
+        if mv is not None: mexpr,j=mv; return SayStmt(line_no,[mexpr]),j
+        return SayStmt(line_no, [] if not rest else [parse_expr(x,line_no) for x in split_top(rest)]),i+1
     if text=='stop': return StopStmt(line_no),i+1
     if text=='skip': return SkipStmt(line_no),i+1
     if text.startswith('give back'):
-        rest=text[9:].strip(); return ReturnStmt(line_no,None if not rest else parse_expr(rest,line_no)),i+1
+        rest=text[9:].strip()
+        mv=_match_value_at(lines,i,ind,rest,line_no)
+        if mv is not None: mexpr,j=mv; return ReturnStmt(line_no,mexpr),j
+        return ReturnStmt(line_no,None if not rest else parse_expr(rest,line_no)),i+1
     if text.startswith('use '): return UseStmt(line_no,text[4:].strip()),i+1
     if text.startswith('ask number '):
         rest=text[11:]; pos=find_top_level(rest,' into ')
@@ -217,14 +234,19 @@ def parse_pattern(s,line):
     if isinstance(e,NameExpr): return MatchBind(line,e.name)
     raise ParseError(f'bad pattern "{s}"', line, token=s)
 
-def parse_match(lines,i,ind):
-    line_no=i+1; text=lines[i].strip()
-    require_colon(lines[i],line_no); expr=parse_expr(text[6:-1].strip(),line_no)
-    cases=[]; otherwise=None; j=i+1
+def _match_arm_start(lines,i,ind,line_no,kw):
+    # Skip blank/comment lines; the first real line sets the arm indent.
+    j=i+1
     while j<len(lines) and (not lines[j].strip() or lines[j].lstrip().startswith('#')): j+=1
-    if j>=len(lines): raise ParseError('match needs at least one "when"', line_no, col=_kw_col(lines,i,ind,'match '))
+    if j>=len(lines): raise ParseError('match needs at least one "when"', line_no, col=_kw_col(lines,i,ind,kw))
     arm_ind=indent_of(lines[j])
-    if arm_ind<=ind: raise ParseError('match needs at least one "when"', line_no, col=_kw_col(lines,i,ind,'match '))
+    if arm_ind<=ind: raise ParseError('match needs at least one "when"', line_no, col=_kw_col(lines,i,ind,kw))
+    return j,arm_ind
+
+def parse_match_arms(lines,j,arm_ind,ind):
+    # Parse `when`/`otherwise` arms; arms sit at indent arm_ind, `ind` is the
+    # enclosing statement's indent (for diagnostics). Returns (cases, otherwise, j).
+    cases=[]; otherwise=None
     while j<len(lines):
         t=lines[j].strip(); ln=j+1
         if not t or t.startswith('#'): j+=1; continue
@@ -250,9 +272,27 @@ def parse_match(lines,i,ind):
         elif t=='otherwise:':
             body,k=child_block(lines,j+1,aind); otherwise=body; j=k; break
         else: raise ParseError('expected "when ..." or "otherwise:" in match', ln, col=aind+1)
+    return cases,otherwise,j
+
+def parse_match(lines,i,ind):
+    line_no=i+1; text=lines[i].strip()
+    require_colon(lines[i],line_no); expr=parse_expr(text[6:-1].strip(),line_no)
+    j,arm_ind=_match_arm_start(lines,i,ind,line_no,'match ')
+    cases,otherwise,j=parse_match_arms(lines,j,arm_ind,ind)
     if not cases and otherwise is None:
         raise ParseError('match needs at least one "when"', line_no, col=_kw_col(lines,i,ind,'match '))
     return MatchStmt(line_no,expr,cases,otherwise),j
+
+def parse_match_value(lines,i,ind,value_str,line_no):
+    # A match used as an expression: `set x to match EXPR:` / `give back match
+    # EXPR:` / `say match EXPR:` -- value_str is the stripped `match EXPR:`.
+    # The arms are indented under this statement like a match statement's.
+    require_colon(lines[i],line_no); expr=parse_expr(value_str[6:-1].strip(),line_no)
+    j,arm_ind=_match_arm_start(lines,i,ind,line_no,'match ')
+    cases,otherwise,j=parse_match_arms(lines,j,arm_ind,ind)
+    if not cases and otherwise is None:
+        raise ParseError('match needs at least one "when"', line_no, col=_kw_col(lines,i,ind,'match '))
+    return MatchExpr(line_no,expr,cases,otherwise),j
 
 def parse_if(lines,i,ind):
     branches=[]; otherwise=None; j=i

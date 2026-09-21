@@ -1,0 +1,69 @@
+set grade to match 85:
+    when n if n is at least 90:
+        "honors"
+    when n if n is at least 50:
+        "pass"
+    otherwise:
+        "fail"
+say grade
+set grade2: text to match 42:
+    when n if n is at least 90:
+        "honors"
+    when n if n is at least 50:
+        "pass"
+    otherwise:
+        "fail"
+say grade2
+set total to match [3, 4]:
+    when [a, b]:
+        a + b
+    otherwise:
+        0
+say total
+set who to match {name: "Casper"}:
+    when {name: n}:
+        n
+    otherwise:
+        "stranger"
+say who
+set kind to match 7:
+    when 1:
+        "one"
+    when x:
+        "other " + text(x)
+say kind
+to classify with v:
+    give back match v:
+        when [a]:
+            "single " + text(a)
+        when {k: w}:
+            "rec " + text(w)
+        otherwise:
+            "misc"
+say classify([9])
+say classify({k: 1})
+say classify(5)
+set nested to match 1:
+    when 1:
+        set inner to match 2:
+            when 2:
+                "inner-two"
+            otherwise:
+                "inner-other"
+        "outer-" + inner
+    otherwise:
+        "outer-other"
+say nested
+set withstmts to match [1, 2, 3]:
+    when [first, ...rest]:
+        say "saw rest"
+        text(first) + "/" + text(length(rest))
+    otherwise:
+        "empty"
+say withstmts
+set picked to match [ok(7)]:
+    when [ok v]:
+        v * 2
+    otherwise:
+        0
+say picked

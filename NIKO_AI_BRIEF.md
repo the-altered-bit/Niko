@@ -128,6 +128,24 @@ optional fallback; with no match and no `otherwise`, the program just
 carries on. An **option** (`option<T>`) is even simpler: a value or
 `nothing` — `unwrap_or(maybe_name, 0)` gives the value or `0`.
 
+`match` also works as an expression — the winning arm's last line is the
+value:
+
+```
+set grade to match score:
+    when n if n is at least 90:
+        "honors"
+    when n if n is at least 50:
+        "pass"
+    otherwise:
+        "fail"
+```
+
+Each arm must end with an expression (not `say`), all arms must produce
+the same kind of value, and the match must be exhaustive — it needs
+`otherwise:` or a catch-all `when x:` as the last arm. Also usable after
+`give back` and `say`.
+
 In the browser IDE, files live in `localStorage` (virtual); on the desktop they are real files.
 
 ## 5. Error messages (part of the language design)

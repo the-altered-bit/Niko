@@ -23,7 +23,7 @@ from pathlib import Path
 from ..ast import (
     Node, Program, SetStmt, IndexSetStmt, AugAssignStmt, PutStmt, RemoveStmt,
     AskStmt, SayStmt, ExprStmt, IfStmt, RepeatStmt, ForStmt, WhileStmt,
-    StopStmt, SkipStmt, FunctionDef, ReturnStmt, UseStmt, MatchStmt,
+    StopStmt, SkipStmt, FunctionDef, ReturnStmt, UseStmt, MatchStmt, MatchExpr,
     MatchLit, MatchBind, MatchOk, MatchErr, MatchList, MatchRest, MatchRecord,
     CallExpr, NameExpr, LiteralExpr, ListExpr, RecordExpr, IndexExpr,
     UnaryExpr, BinaryExpr, AttrExpr,
@@ -192,11 +192,26 @@ class NikoCCompiler:
                 yield from node.otherwise
         elif isinstance(node, (RepeatStmt, ForStmt, WhileStmt)):
             yield from node.body
-        elif isinstance(node, MatchStmt):
+        elif isinstance(node, (MatchStmt, MatchExpr)):
             for case in node.cases:
                 yield from case.body
             if node.otherwise:
                 yield from node.otherwise
+
+    def _match_exprs(self, s):
+        """MatchExpr nodes sitting in expression position of statement s.
+        Match expressions only appear as the whole RHS of set / give back /
+        say -- never nested inside other expressions, guards, or call args.
+        """
+        if isinstance(s, (SetStmt, ReturnStmt, ExprStmt)):
+            exprs = (s.expr,)
+        elif isinstance(s, SayStmt):
+            exprs = s.exprs
+        else:
+            return
+        for e in exprs:
+            if isinstance(e, MatchExpr):
+                yield e
 
     def _walk(self, stmts, fn):
         for s in stmts:
@@ -205,6 +220,10 @@ class NikoCCompiler:
             fn(s)
             for c in self._children(s):
                 self._walk([c], fn)
+            for m in self._match_exprs(s):
+                fn(m)
+                for c in self._children(m):
+                    self._walk([c], fn)
 
     def _assigned(self, body):
         """Names bound by set/for/ask/match in a body (not crossing into
@@ -218,7 +237,7 @@ class NikoCCompiler:
                 names.append(s.name)
             elif isinstance(s, AskStmt):
                 names.append(s.name)
-            elif isinstance(s, MatchStmt):
+            elif isinstance(s, MatchStmt) or isinstance(s, MatchExpr):
                 for case in s.cases:
                     for p in case.patterns:
                         names.extend(_match_binding_names(p))
@@ -365,6 +384,15 @@ class NikoCCompiler:
             return f'nval_binary({line}, {op}, {l}, {r})'
         if isinstance(n, CallExpr):
             return self._gen_call(n)
+        if isinstance(n, MatchExpr):
+            # C has no expression-blocks: emit the match as statements into
+            # a fresh temp and yield the temp as the C expression. Emission
+            # order works because gen_expr runs before the enclosing _emit.
+            # A fresh temp per call keeps nested match expressions safe.
+            t = self._tmp()
+            self._emit(f'NVal *{t} = nval_nothing();')
+            self._gen_match(n, result=t)
+            return t
         raise CompileError(f"the native backend can't compile "
                            f"{type(n).__name__} yet", line=line)
 
@@ -584,11 +612,15 @@ class NikoCCompiler:
                    f'{len(name_b)}, {env_c});')
         self._store(n.name, tf, line)
 
-    def _gen_match(self, n):
+    def _gen_match(self, n, result=None):
         # Per pattern (not else-chained): the guard must be evaluated after
         # the bindings, so it cannot be part of the `if (...)` condition.
         # First match still wins via `goto`; a failed guard falls through
         # to the next pattern exactly like a failed test.
+        # When `result` is a C lvalue, each arm produces a value: the
+        # statements except the last run as statements, the last (always an
+        # expression, per the checker) is stored into `result` -- mirroring
+        # the VM's match_expr. Otherwise bodies run as plain statements.
         ts = self._tmp()
         self._emit(f'NVal *{ts} = {self.gen_expr(n.expr)};')
         exits = []
@@ -599,8 +631,7 @@ class NikoCCompiler:
                 if case.guard is not None:
                     self._emit(
                         f'if (nval_truthy({self.gen_expr(case.guard)})) {{')
-                for s in case.body:
-                    self.gen_stmt(s)
+                self._match_arm_body(case.body, result, case.line)
                 te = self._tmp()
                 self._emit(f'goto match_end_{te};')
                 exits.append(te)
@@ -609,11 +640,26 @@ class NikoCCompiler:
                 self._emit('}')
         if n.otherwise:
             self._emit('{')
-            for s in n.otherwise:
-                self.gen_stmt(s)
+            self._match_arm_body(n.otherwise, result, n.line)
             self._emit('}')
         for te in exits:
             self._emit(f'match_end_{te}: ;')
+
+    def _match_arm_body(self, body, result, line):
+        # Compile a match arm body. With `result` None the statements just
+        # run (match statement). Otherwise the arm's value is its last
+        # expression's value, stored into `result` (the checker guarantees
+        # a trailing expression statement).
+        if result is None:
+            for s in body:
+                self.gen_stmt(s)
+            return
+        if not body or not isinstance(body[-1], ExprStmt):
+            raise CompileError('match arm must end with an expression to '
+                               'produce a value', line=line)
+        for s in body[:-1]:
+            self.gen_stmt(s)
+        self._emit(f'{result} = {self.gen_expr(body[-1].expr)};')
 
     def _match_test(self, p, ts, line):
         # Return a C int expression testing pattern p against the NVal* C

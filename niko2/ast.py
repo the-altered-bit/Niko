@@ -41,6 +41,8 @@ class UseStmt(Node): module:str
 @dataclass
 class MatchStmt(Node): expr:object; cases:list; otherwise:list|None=None
 @dataclass
+class MatchExpr(Node): expr:object; cases:list; otherwise:list|None=None
+@dataclass
 class MatchCase(Node): patterns:list; guard:object|None=None; body:list=None
 @dataclass
 class MatchLit(Node): value:object

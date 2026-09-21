@@ -162,6 +162,18 @@ class _Collector:
     def walk_expr(self, e):
         if e is None:
             return
+        if isinstance(e, MatchExpr):
+            self._note(e)
+            self.walk_expr(e.expr)
+            for case in e.cases:
+                for p in case.patterns:
+                    self._define_pattern(p)
+                if case.guard is not None:
+                    self.walk_expr(case.guard)
+                self.block(case.body)
+            if e.otherwise:
+                self.block(e.otherwise)
+            return
         self._note(e)
         for attr in ('left', 'right', 'expr', 'obj', 'index', 'fn'):
             sub = getattr(e, attr, None)

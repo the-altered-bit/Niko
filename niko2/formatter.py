@@ -37,10 +37,27 @@ def format_expr(node, parent_prec=0):
     raise ValueError(f'Unsupported expression node {type(node).__name__}')
 
 
+def format_match_expr(node, header, indent=0):
+    # A match used as an expression: `header` is the first line up to and
+    # including `match <subject>:`; arms follow indented like a statement.
+    pad = ' ' * indent
+    lines = [f'{pad}{header}']
+    for case in node.cases:
+        pats = ', '.join(format_pattern(p) for p in case.patterns)
+        g = f' if {format_expr(case.guard)}' if case.guard is not None else ''
+        lines.append(f'{pad}    when {pats}{g}:')
+        lines.extend(format_block(case.body, indent + 8))
+    if node.otherwise:
+        lines.append(f'{pad}    otherwise:')
+        lines.extend(format_block(node.otherwise, indent + 8))
+    return '\n'.join(lines)
+
 def format_stmt(node, indent=0):
     pad = ' ' * indent
     if isinstance(node, SetStmt):
         ann = f': {node.type_name}' if node.type_name else ''
+        if isinstance(node.expr, MatchExpr):
+            return format_match_expr(node.expr, f'set {node.name}{ann} to match {format_expr(node.expr.expr)}:', indent)
         return f'{pad}set {node.name}{ann} to {format_expr(node.expr)}'
     if isinstance(node, IndexSetStmt):
         return f'{pad}set {format_expr(node.target)}[{format_expr(node.index)}] to {format_expr(node.expr)}'
@@ -55,6 +72,8 @@ def format_stmt(node, indent=0):
         kind = 'ask number ' if node.want_number else 'ask '
         return f'{pad}{kind}{format_expr(node.prompt)} into {node.name}'
     if isinstance(node, SayStmt):
+        if len(node.exprs) == 1 and isinstance(node.exprs[0], MatchExpr):
+            return format_match_expr(node.exprs[0], f'say match {format_expr(node.exprs[0].expr)}:', indent)
         exprs = ', '.join(format_expr(x) for x in node.exprs)
         return f'{pad}say {exprs}' if exprs else f'{pad}say'
     if isinstance(node, ExprStmt):
@@ -103,6 +122,8 @@ def format_stmt(node, indent=0):
         body = format_block(node.body, indent + 4)
         return header + '\n' + '\n'.join(body)
     if isinstance(node, ReturnStmt):
+        if isinstance(node.expr, MatchExpr):
+            return format_match_expr(node.expr, f'give back match {format_expr(node.expr.expr)}:', indent)
         return f'{pad}give back {format_expr(node.expr)}' if node.expr is not None else f'{pad}give back'
     if isinstance(node, UseStmt):
         return f'{pad}use {node.module!r}'

@@ -14,7 +14,7 @@ import struct
 from ..ast import (
     Program, SetStmt, IndexSetStmt, AugAssignStmt, PutStmt, RemoveStmt,
     AskStmt, SayStmt, ExprStmt, IfStmt, RepeatStmt, ForStmt, WhileStmt,
-    StopStmt, SkipStmt, ReturnStmt, UseStmt, MatchStmt, FunctionDef,
+    StopStmt, SkipStmt, ReturnStmt, UseStmt, MatchStmt, MatchExpr, FunctionDef,
     CallExpr, NameExpr, LiteralExpr, ListExpr, RecordExpr, IndexExpr,
     UnaryExpr, BinaryExpr, AttrExpr, MatchLit, MatchBind, MatchOk, MatchErr,
     MatchList, MatchRest, MatchRecord,
@@ -3548,7 +3548,43 @@ class WasmCompiler:
             self._gen_block(n.otherwise)
         w.end()
 
-    def _gen_match_arm(self, p, slot, depth, end, case):
+    def _gen_match_expr(self, n):
+        # Alpha 12: match as an expression. Mirrors _gen_match: the
+        # subject is evaluated once; the winning arm's final expression
+        # value is stored into a fresh result local; the local is loaded
+        # at the end so the value is left on the stack as the
+        # expression's value. Fresh locals per call keep nested match
+        # expressions safe.
+        w = self.cur.w
+        self._gen_expr(n.expr)
+        subj = self.cur.new_local(); w.local_set(subj)
+        result = self.cur.new_local()
+        # Pre-initialize the result to nothing as defensive insurance,
+        # mirroring the VM's $matchval initialization.
+        self._push_literal(None, n.line)
+        w.local_set(result)
+        end = w.block()
+        for case in n.cases:
+            for p in case.patterns:
+                self._gen_match_arm(p, subj, 0, end, case, result=result)
+        if n.otherwise:
+            self._gen_arm_value(n.otherwise, result, n.line)
+        w.end()
+        w.local_get(result)
+
+    def _gen_arm_value(self, body, result, line):
+        # Compile an arm body, storing the final expression's value into
+        # the result local. The checker guarantees the body ends with an
+        # ExprStmt; re-verify here defensively.
+        if not body or not isinstance(body[-1], ExprStmt):
+            raise CompileError('match arm must end with an expression to produce a value',
+                               line=line)
+        for s in body[:-1]:
+            self._gen_stmt(s)
+        self._gen_expr(body[-1].expr)
+        self.cur.w.local_set(result)
+
+    def _gen_match_arm(self, p, slot, depth, end, case, result=None):
         # Alpha 11: guards + list/record patterns. Each test condition opens
         # a nested if_ (short-circuiting exactly like the VM's JUMP_IF_FALSE
         # chain); at the innermost point the bindings are performed, then the
@@ -3564,16 +3600,22 @@ class WasmCompiler:
 
         self._pat_test(p, slot, depth, cond)
         self._pat_bind(p, slot, depth)
+
+        def body():
+            if result is None:
+                self._gen_block(case.body)
+            else:
+                self._gen_arm_value(case.body, result, case.line)
+            w.br(end)
+
         if case.guard is not None:
             self._gen_expr(case.guard)
             w.call(self.h["truthy"])
             w.if_()
-            self._gen_block(case.body)
-            w.br(end)
+            body()
             w.end()
         else:
-            self._gen_block(case.body)
-            w.br(end)
+            body()
         for _ in range(opened[0]):
             w.end()
 
@@ -3857,6 +3899,8 @@ class WasmCompiler:
             w.call(self.h["binary"])
         elif isinstance(n, CallExpr):
             self._gen_call(n)
+        elif isinstance(n, MatchExpr):
+            self._gen_match_expr(n)
         else:
             raise CompileError(f"the WASM backend can't compile {type(n).__name__} yet",
                                line=line)

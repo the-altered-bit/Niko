@@ -109,7 +109,7 @@ class Checker:
         for n in body:self.stmt(n,return_type)
     def stmt(self,n,return_type):
         if isinstance(n,SetStmt):
-            t=self.expr(n.expr); want=type_from_name(n.type_name)
+            t=self.match_expr(n.expr,return_type) if isinstance(n.expr,MatchExpr) else self.expr(n.expr); want=type_from_name(n.type_name)
             if n.type_name and isinstance(n.expr,ListExpr) and want.name=='list' and want.arg is not None:
                 # A list literal is checked against the annotation element by
                 # element, so `set xs: list<number> to [1, "a"]` fails instead
@@ -122,10 +122,12 @@ class Checker:
                 self.error(n.line,f'cannot assign {t} to {want} variable "{n.name}"')
             self.define(n.name,want if n.type_name else t,n.line)
         elif isinstance(n,SayStmt):
-            for x in n.exprs:self.expr(x)
+            for x in n.exprs:
+                if isinstance(x,MatchExpr): self.match_expr(x,return_type)
+                else: self.expr(x)
         elif isinstance(n,ExprStmt): self.expr(n.expr)
         elif isinstance(n,ReturnStmt):
-            got=NOTHING if n.expr is None else self.expr(n.expr)
+            got=NOTHING if n.expr is None else (self.match_expr(n.expr,return_type) if isinstance(n.expr,MatchExpr) else self.expr(n.expr))
             if return_type is not None and not compatible(got,return_type): self.error(n.line,f'returns {got}, expected {return_type}')
         elif isinstance(n,FunctionDef):
             ret=type_from_name(n.return_type)
@@ -226,6 +228,42 @@ class Checker:
             for _,sub in p.fields:
                 self.match_pat(sub,ANY,line)
         # MatchLit and MatchRest (handled by MatchList) bind nothing here
+    def _match_arm_type(self,body,line,return_type):
+        # An arm body's value is its last statement, which must be an expression.
+        if not body or not isinstance(body[-1],ExprStmt):
+            self.error(line,'match arm must end with an expression to produce a value',token='when')
+        for x in body[:-1]: self.stmt(x,return_type)
+        return self.expr(body[-1].expr)
+    def match_expr(self,n,return_type):
+        # A match used as an expression: typed result, exhaustiveness enforced.
+        t=self.expr(n.expr)
+        if not n.otherwise:
+            last=n.cases[-1] if n.cases else None
+            exhaustive=(last is not None and last.guard is None and
+                        any(isinstance(p,MatchBind) for p in last.patterns))
+            if not exhaustive:
+                self.error(n.line,'match expression must be exhaustive -- add an otherwise: arm',token='match')
+        arm_types=[]
+        for case in n.cases:
+            self.scopes.append({})
+            for p in case.patterns: self.match_pat(p,t,n.line)
+            if case.guard is not None:
+                g=self.expr(case.guard)
+                if g not in (BOOLEAN,ANY): self.error(case.guard.line,f'when guard must be boolean, got {g}')
+            arm_types.append(self._match_arm_type(case.body,case.line,return_type))
+            self.scopes.pop()
+        if n.otherwise:
+            self.scopes.append({})
+            arm_types.append(self._match_arm_type(n.otherwise,n.line,return_type))
+            self.scopes.pop()
+        result=arm_types[0]
+        for at in arm_types[1:]:
+            if not compatible(at,result) and not compatible(result,at):
+                self.error(n.line,f'match arms produce different types: {result} vs {at}',token='match')
+        if result==ANY:
+            for at in arm_types:
+                if at!=ANY: result=at; break
+        return result
     def expr(self,n):
         if isinstance(n,LiteralExpr):
             if n.value is None:return NOTHING

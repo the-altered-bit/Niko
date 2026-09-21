@@ -88,6 +88,14 @@ match cases in `tests/test_formatter.py`.
   output. Tests: `tests/niko2_cases/match_patterns.niko`,
   `tests/test_match_patterns.py` (checker rejections + 3-way differential).
   See `RELEASE_NOTES_ALPHA11.md` and `ALPHA11_DESIGN.md`.
+- **Alpha 12 is complete**: match as an expression on ALL backends.
+  `set x to match v:` / `give back match v:` / `say match v:` — the winning
+  arm's final expression is the value. Checker-enforced exhaustiveness
+  (`otherwise:` or unguarded catch-all) and arm-type agreement; each arm
+  body must end with an expression. Tests:
+  `tests/niko2_cases/match_expr.niko`, `tests/test_match_expr.py`
+  (checker rejections + 3-way differential, byte-identical).
+  See `RELEASE_NOTES_ALPHA12.md` and `ALPHA12_DESIGN.md`.
 
 ## Standing cautions
 

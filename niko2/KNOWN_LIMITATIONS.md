@@ -78,8 +78,14 @@ implementation.
   statically known wrong types. The compiler desugars to jumps plus
   `is_ok`/`unwrap` calls and three tiny opcodes (`IS_LIST`, `IS_RECORD`,
   `LIST_SLICE`) — no new VM opcodes for the classic patterns.
-- Not yet: `match` as an expression, `some()` constructor (options are
-  just `T | nothing`).
+- `match` as an expression (Alpha 12, complete): `set x to match v:`,
+  `give back match v:`, `say match v:` — the winning arm's final
+  expression is the value (new `MatchExpr` AST node). The checker requires
+  exhaustiveness (`otherwise:` or an unguarded catch-all `when x:` last
+  arm) and arm-type agreement; each arm body must end with an expression.
+  VM uses a hidden `$matchval` slot; WASM/native use fresh result
+  locals/temps. Match statements keep their lenient no-match behavior.
+- Not yet: `some()` constructor (options are just `T | nothing`).
 - Caution: the compiler stores the match subject in a hidden `$match`
   slot (nested pattern subjects in `$patN` slots). User code cannot name
   `$`, so this is safe, but a future backend should use real temp

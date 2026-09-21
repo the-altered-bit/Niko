@@ -23,8 +23,8 @@ from dataclasses import dataclass
 from .ast import (
     Node, FunctionDef, SetStmt, AskStmt, ForStmt, AugAssignStmt,
     MatchBind, MatchOk, MatchErr, MatchList, MatchRest, MatchRecord,
-    MatchStmt, NameExpr, CallExpr,
-    IfStmt, RepeatStmt, WhileStmt,
+    MatchStmt, MatchExpr, NameExpr, CallExpr,
+    IfStmt, RepeatStmt, WhileStmt, SayStmt, ReturnStmt,
 )
 
 
@@ -61,6 +61,24 @@ def _pattern_names(p):
             yield from _pattern_names(sub)
 
 
+def _match_exprs_in(stmt):
+    """MatchExpr nodes directly in a statement's expression positions.
+
+    The parser only puts match expressions as the whole value of
+    set/say/give-back, so those are the only positions to scan.
+    """
+    if isinstance(stmt, SetStmt):
+        if isinstance(stmt.expr, MatchExpr):
+            yield stmt.expr
+    elif isinstance(stmt, SayStmt):
+        for e in stmt.exprs:
+            if isinstance(e, MatchExpr):
+                yield e
+    elif isinstance(stmt, ReturnStmt):
+        if isinstance(stmt.expr, MatchExpr):
+            yield stmt.expr
+
+
 def _stmt_children(stmt):
     """Statement lists nested directly inside stmt (not crossing FunctionDef)."""
     if isinstance(stmt, IfStmt):
@@ -75,6 +93,12 @@ def _stmt_children(stmt):
             yield case.body
         if stmt.otherwise:
             yield stmt.otherwise
+    # A match expression nests arm bodies inside set/say/give-back.
+    for e in _match_exprs_in(stmt):
+        for case in e.cases:
+            yield case.body
+        if e.otherwise:
+            yield e.otherwise
 
 
 def _walk_stmts(stmts, fn):
@@ -98,6 +122,20 @@ def _refs_of_function(node):
 
     def expr(n):
         if isinstance(n, FunctionDef):
+            return
+        if isinstance(n, MatchExpr):
+            expr(n.expr)
+            for case in n.cases:
+                for p in case.patterns:
+                    for name in _pattern_names(p):
+                        out.append(('write', name))
+                if case.guard is not None:
+                    expr(case.guard)
+                for x in case.body:
+                    stmt(x)
+            if n.otherwise:
+                for x in n.otherwise:
+                    stmt(x)
             return
         if isinstance(n, NameExpr):
             out.append(('read', n.name))
@@ -208,6 +246,11 @@ def _bound_of(node):
                         bound.add(name)
         elif isinstance(s, FunctionDef):
             bound.add(s.name)
+        for e in _match_exprs_in(s):
+            for case in e.cases:
+                for p in case.patterns:
+                    for name in _pattern_names(p):
+                        bound.add(name)
 
     # nested FunctionDef *statements* bind their name in this scope, but their
     # *bodies* belong to the nested scope -- handle them explicitly instead of

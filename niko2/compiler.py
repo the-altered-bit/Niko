@@ -124,6 +124,39 @@ class Compiler:
         end=len(b.code)
         for p in exits:b.patch(p,end)
 
+    def _match_arm_value(self,body,b,line):
+        # Compile an arm body, leaving the final expression's value on the stack.
+        if not body or not isinstance(body[-1],ExprStmt):
+            raise CompileError('match arm must end with an expression to produce a value',line=line)
+        for x in body[:-1]:self.stmt(x,b)
+        self.expr(body[-1].expr,b)
+    def match_expr(self,n,b):
+        # A match used as an expression. Same per-arm semantics as
+        # match_stmt; the winning arm's final expression value is left on
+        # the stack. $matchval is pre-initialized to nothing so an
+        # unchecked tree can't read an unbound slot.
+        self.expr(n.expr,b); b.emit('STORE','$match',n.line)
+        b.emit('PUSH_CONST',b.const(None,n.line),n.line); b.emit('STORE','$matchval',n.line)
+        exits=[]
+        for case in n.cases:
+            for p in case.patterns:
+                fails=[]
+                self._test_fails(p,b,'$match',0,fails)
+                self.match_bind(p,b,'$match',0)
+                if case.guard is not None:
+                    self.expr(case.guard,b)
+                    fails.append(b.emit('JUMP_IF_FALSE',None,case.guard.line))
+                self._match_arm_value(case.body,b,case.line)
+                b.emit('STORE','$matchval',n.line)
+                exits.append(b.emit('JUMP',None,n.line))
+                for f_ in fails: b.patch(f_,len(b.code))
+        if n.otherwise:
+            self._match_arm_value(n.otherwise,b,n.line)
+            b.emit('STORE','$matchval',n.line)
+        end=len(b.code)
+        for p in exits:b.patch(p,end)
+        b.emit('LOAD','$matchval',n.line)
+
     def _test_fails(self,p,b,slot,depth,fails):
         # Emits the test for pattern p against the value in hidden slot
         # `slot`. Appends JUMP_IF_FALSE patch points (all patched to the
@@ -229,6 +262,7 @@ class Compiler:
             self.expr(n.fn,b)
             for x in n.args:self.expr(x,b)
             b.emit('CALL',len(n.args),n.line)
+        elif isinstance(n,MatchExpr): self.match_expr(n,b)
         else: raise CompileError(f'unsupported expression {type(n).__name__}', line=n.line)
 
 def compile_ast(tree): return Compiler().compile(tree)
