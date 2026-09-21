@@ -125,6 +125,15 @@ match cases in `tests/test_formatter.py`.
   checker/WASM/native). Full suite green. Package manager / registry
   stays future work. See `RELEASE_NOTES_ALPHA14.md`, `ALPHA14_DESIGN.md`,
   `STDLIB.md`.
+- **Alpha 15 is complete**: WASM codegen bugfix — `skip` inside
+  `for`/`repeat` loops used to hang node forever (the `br` back to the loop
+  head never advanced the index; visible as `skip` inside a `match` arm
+  inside a loop). `skip` now emits the index increment before branching
+  back, matching the VM; `stop` verified correct. `stdlib/lists.niko`'s
+  `flatten` uses the clean `when []: skip` arm (workaround removed);
+  known-limits entry removed. New `tests/test_loop_control.py`: 11 cases
+  3-way differential (VM/WASM/native byte-identical) with timeouts. Full
+  suite green. See `RELEASE_NOTES_ALPHA15.md`.
 
 ## Standing cautions
 

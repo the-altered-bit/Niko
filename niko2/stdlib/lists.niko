@@ -44,7 +44,7 @@ to flatten with xs: list -> list:
         match el:
             when []:
                 # Empty inner lists contribute nothing.
-                set nothing_to_add to yes
+                skip
             when [first, ...rest]:
                 put first in out
                 for each r in rest:

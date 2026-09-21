@@ -3216,7 +3216,9 @@ class WasmCompiler:
         # capture environments, and the uniform function signature.
         self.closure_info = analyze_closures(tree)
         self.scopes = [{}]      # module scope; name -> ('local'|'global', idx)
-        self.loop_stack = []    # (break_lbl, cont_lbl) label pairs
+        self.loop_stack = []    # (break_lbl, cont_lbl, on_skip) triples;
+                              # on_skip is a thunk emitting the loop-index
+                              # increment (for/repeat), or None (while).
         self.fn_for = {}        # id(FunctionDef) -> Func
         self.fn_table_idx = {}  # id(FunctionDef) -> funcref table index
         self.cur_info = None    # ClosureInfo of the function being generated
@@ -3422,7 +3424,11 @@ class WasmCompiler:
             cnt = self.cur.new_local(); w.local_set(cnt)
             i = self.cur.new_local(); w.i32_const(0); w.local_set(i)
             brk = w.block(); cont = w.loop()
-            self.loop_stack.append((brk, cont))
+            # Alpha 15: `skip` must advance the counter before branching
+            # back, or the same iteration repeats forever.
+            on_skip = lambda i=i: (w.local_get(i), w.i32_const(1),
+                                   w.i32_add(), w.local_set(i))
+            self.loop_stack.append((brk, cont, on_skip))
             w.local_get(i); w.local_get(cnt); w.i32_ge_s(); w.br_if(brk)
             self._gen_block(n.body)
             w.local_get(i); w.i32_const(1); w.i32_add(); w.local_set(i)
@@ -3433,7 +3439,7 @@ class WasmCompiler:
             self._gen_for(n)
         elif isinstance(n, WhileStmt):
             brk = w.block(); cont = w.loop()
-            self.loop_stack.append((brk, cont))
+            self.loop_stack.append((brk, cont, None))
             self._gen_expr(n.cond)
             w.call(self.h["truthy"]); w.i32_eqz(); w.br_if(brk)
             self._gen_block(n.body)
@@ -3447,7 +3453,12 @@ class WasmCompiler:
         elif isinstance(n, SkipStmt):
             if not self.loop_stack:
                 raise CompileError("'skip' outside a loop", line=line)
-            w.br(self.loop_stack[-1][1])
+            brk, cont, on_skip = self.loop_stack[-1]
+            if on_skip is not None:
+                # Alpha 15: for/repeat advance the index here so the next
+                # iteration runs; without this the loop hangs.
+                on_skip()
+            w.br(cont)
         elif isinstance(n, ReturnStmt):
             if n.expr is None:
                 w.i32_const(0)
@@ -3523,7 +3534,10 @@ class WasmCompiler:
         it = self.cur.new_local(); w.local_set(it)
         i = self.cur.new_local(); w.i32_const(0); w.local_set(i)
         brk = w.block(); cont = w.loop()
-        self.loop_stack.append((brk, cont))
+        # Alpha 15: `skip` advances the index before branching back.
+        on_skip = lambda i=i: (w.local_get(i), w.i32_const(1),
+                               w.i32_add(), w.local_set(i))
+        self.loop_stack.append((brk, cont, on_skip))
         # n is re-read each pass so `put` inside the loop behaves like the VM
         w.local_get(i); w.local_get(it); w.i32_load(8); w.i32_ge_u(); w.br_if(brk)
         w.local_get(it); w.i32_load(4)
