@@ -171,3 +171,27 @@ it's formatting/diagnosing is closer to feature-complete.
   provide the `niko_input` import.
 - **`now()`/`today()`/`random_int` come from the host** environment.
 - Host shim: `niko2/backends/wasm_host.cjs` (node.js).
+
+## Alpha 9 native backend limits
+
+The native backend (`niko2 native`) compiles to C and then to a real
+executable with the system C compiler (`niko2/backends/niko_runtime.c` +
+generated code). Same value model as WASM (boxed values, f64 numbers).
+
+- **Numbers are f64**, printed with shortest-round-trip formatting so
+  `say` output matches the VM exactly.
+- **`upper`/`lower` are ASCII-only**, like WASM.
+- **No `use` imports**, no method-call syntax, no first-class function
+  values — same as WASM.
+- **No closures over enclosing function locals** — raises `CompileError`
+  with the offending name and line, same as WASM (the VM can't even
+  *define* a nested function at runtime; both compiled backends hoist
+  nested definitions and run non-closure nests fine).
+- **The VM's constant-pool dedup bug is not mirrored.** Native output is
+  correct where the VM prints `yes` as `1`.
+- **Panic behavior:** runtime errors print `Niko error at line N: msg` to
+  stderr and exit 1; the VM prints its own format and exits 0.
+- **`ask` and file-I/O builtins work** (stdin, libc stdio, cwd-relative) —
+  these are native-only extras over WASM.
+- Needs `cc`/`gcc`/`clang` on PATH; output is a platform executable
+  (no extension on POSIX, `.exe` on Windows).

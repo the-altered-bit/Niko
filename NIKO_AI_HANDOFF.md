@@ -134,7 +134,8 @@ matching; the package dependency graph (`niko2 deps`) and lock file
 VS Code extension, and a DAP debugger, all tested.
 
 1. **Alpha 7 is done**: `niko2 lsp` (LSP: diagnostics, completion, hover, go-to-definition, formatting), `editors/vscode/` (TextMate grammar + language client + DAP debug type, packaged as `niko-0.7.0.vsix`), `niko2 debug` (DAP adapter over `niko2/debug.py`; VM has an off-by-default per-instruction `trace_fn` hook). Tests: `tests/test_lsp.py`, `tests/test_dap.py`, `editors/vscode/test-grammar.js`.
-2. **Then**: WebAssembly backend (Alpha 8), native backend (Alpha 9).
+2. **Alpha 8 is done**: WebAssembly backend — `niko2 wasm <file> [-o out.wasm] [--run]`, boxed f64 value model, `tests/test_wasm.py` (differential vs VM). Limits: no file-I/O builtins, no `ask` without a host shim, no closures over enclosing function locals. See `RELEASE_NOTES_ALPHA8.md`.
+3. **Alpha 9 is done**: native backend — `niko2 native <file> [-o out] [--run] [--emit-c]`. Compiles checked AST to C (`niko2/backends/native.py`), then to a real executable via the system C compiler using `niko2/backends/niko_runtime.c/.h` (same boxed value model as WASM). Differential `tests/test_native.py` (14 programs vs VM, closure rejection, native-only file-I/O + `ask` tests). Extras over WASM: `ask` (stdin) and file builtins work natively. Limits: no `use` imports, no method-call syntax, no first-class function values, no closures over enclosing function locals, needs `cc`/`gcc`/`clang`. See `RELEASE_NOTES_ALPHA9.md`.
 
 Before adding new features, weigh fixing the gaps above — tooling like the
 formatter is more useful once the language surface is closer to complete.

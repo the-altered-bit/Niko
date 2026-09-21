@@ -66,8 +66,15 @@ match cases in `tests/test_formatter.py`.
   off-by-default). Tests: `tests/test_lsp.py`, `tests/test_dap.py`,
   `editors/vscode/test-grammar.js`. Limits: single-file debugging, no `ask`
   under the debugger, line-oriented hover/definition.
-- WebAssembly backend (Alpha 8), then native (Alpha 9) through the IR/backend
-  interface — keep VM semantics explicit so backends can match them.
+- **Alpha 8 is complete**: WebAssembly backend (`niko2 wasm`). Tests:
+  `tests/test_wasm.py`. Limits: no file-I/O builtins, `ask` needs a host
+  shim, no closures over enclosing function locals.
+- **Alpha 9 is complete**: native backend (`niko2 native`) — AST → C →
+  executable via the system C compiler (`niko2/backends/niko_runtime.c`,
+  `native.py`). Tests: `tests/test_native.py` (differential vs VM).
+  Native extras over WASM: `ask` and the file-I/O builtins work.
+  Limits: no `use` imports, no method calls, no first-class functions,
+  no closures over enclosing function locals, needs `cc`/`gcc`/`clang`.
 
 ## Standing cautions
 

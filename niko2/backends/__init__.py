@@ -45,7 +45,10 @@ def get_backend(name):
     if name == "wasm":
         from .wasm import WasmBackend
         return WasmBackend()
+    if name == "native":
+        from .native import NativeBackend
+        return NativeBackend()
     raise ValueError(f'unknown backend "{name}"')
 
 
-BACKENDS = ("wasm",)
+BACKENDS = ("wasm", "native")

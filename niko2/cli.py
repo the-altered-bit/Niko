@@ -68,9 +68,10 @@ def run(src,name='<memory>'):
 
 def main():
     ap=argparse.ArgumentParser(prog='niko2',description='Niko 2 compiler/interpreter')
-    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','deps','lock','lsp','debug','wasm'])
+    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','deps','lock','lsp','debug','wasm','native'])
     ap.add_argument('file',nargs='?')
-    ap.add_argument('-o','--output',help='output .wasm file (default: <file>.wasm)')
+    ap.add_argument('-o','--output',help='output file (wasm: <file>.wasm, native: <file>)')
+    ap.add_argument('--emit-c',action='store_true',help='(native) also write the generated C source next to the output')
     ap.add_argument('--run',action='store_true',help='run the .wasm with node after building')
     ap.add_argument('--version',action='version',version=f'Niko {VERSION}')
     a=ap.parse_args()
@@ -119,7 +120,7 @@ def main():
         print(f'✓ wrote {lock_path}')
         return 0
     if not a.file:
-        print('Usage: niko2 run <file.niko|.nikoir> | niko2 check <file.niko> | niko2 format <file.niko> | niko2 deps [folder] | niko2 lock [folder] | niko2 init <folder> | niko2 lsp | niko2 debug | niko2 wasm <file.niko> [-o out.wasm] [--run]'); return 2
+        print('Usage: niko2 run <file.niko|.nikoir> | niko2 check <file.niko> | niko2 format <file.niko> | niko2 deps [folder] | niko2 lock [folder] | niko2 init <folder> | niko2 lsp | niko2 debug | niko2 wasm <file.niko> [-o out.wasm] [--run] | niko2 native <file.niko> [-o out] [--run] [--emit-c]'); return 2
 
     # Alpha 8: compile to WebAssembly.
     if a.command=='wasm':
@@ -144,6 +145,36 @@ def main():
                 print('Niko error: --run needs node.js on PATH'); return 1
             host=Path(__file__).parent/'backends'/'wasm_host.cjs'
             r=subprocess.run([node,str(host),str(out)])
+            return r.returncode
+        return 0
+
+    # Alpha 9: compile to a native executable via C.
+    if a.command=='native':
+        import shutil, subprocess
+        from .backends.native import NativeBackend, CompileError as NativeCompileError
+        try: src=Path(a.file).read_text(encoding='utf8')
+        except OSError as e: print(f'Niko error: {e}'); return 1
+        try:
+            tree=compile_source(src,a.file)
+            backend=NativeBackend()
+            exe_bytes=backend.compile(tree)
+        except ParseError as e:
+            print(format_parse_error(src, e, a.file)); return 1
+        except (TypeErrorNiko,CompileError,NikoRuntimeError,NativeCompileError) as e:
+            print(format_diagnostic(src, e, a.file)); return 1
+        bext=backend.output_extension
+        out=Path(a.output) if a.output else Path(a.file).with_suffix(bext) if bext else Path(a.file).with_suffix('')
+        if a.emit_c:
+            try: Path(str(out)+'.c').write_text(backend.compile_c(tree),encoding='utf8')
+            except OSError as e: print(f'Niko error: {e}'); return 1
+        try:
+            out.write_bytes(exe_bytes)
+            try: out.chmod(0o755)
+            except OSError: pass
+        except OSError as e: print(f'Niko error: {e}'); return 1
+        print(f'\u2713 built {out} ({len(exe_bytes)} bytes)', flush=True)
+        if a.run:
+            r=subprocess.run([str(out.resolve())])
             return r.returncode
         return 0
 
