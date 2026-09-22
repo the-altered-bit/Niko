@@ -1,0 +1,10 @@
+to greet: -> text:
+    give back "hi"
+
+say greet()
+
+to add with a, b: -> number:
+    give back a + b
+
+say add(2, 3)
+say add(10, 20)

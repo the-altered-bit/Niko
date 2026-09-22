@@ -10,6 +10,14 @@ Pause granularity is one source line: the hook only considers pausing
 when execution arrives at a new (frame, line) pair, so a line that
 compiles to several instructions pauses once, not once per instruction.
 
+Conditional breakpoints (Alpha 21): a breakpoint may carry a condition
+expression, which is evaluated at hit time against the current frame's
+locals (the same machinery as `evaluate()`) -- the breakpoint stops only
+when the result is truthy, the same `bool()` test the VM uses for `if`.
+A condition that fails to parse, typecheck, or evaluate surfaces a
+warning and stops anyway; the session never dies or hangs on a bad
+condition.
+
 Multi-file programs (Alpha 18) go through the module pipeline
 (`niko2/modules.py`) before compiling: every reachable module is
 typechecked and the graph is desugared to one Program whose per-module
@@ -44,7 +52,9 @@ class _EvalBudgetExceeded(Exception):
 class Debugger:
     def __init__(self, path):
         self.path = str(path)
-        self.breakpoints = {}          # path -> set of 1-based lines
+        # path -> {1-based line: condition source text or None}. A None (or
+        # empty) condition is an unconditional breakpoint, evaluated never.
+        self.breakpoints = {}
         self.vm = VM()
         self.vm.trace_fn = self._on_ins
         self.vm.input_fn = self._ask_input
@@ -69,8 +79,17 @@ class Debugger:
 
     # -- configuration -------------------------------------------------
 
-    def set_breakpoints(self, path, lines):
-        self.breakpoints[str(path)] = set(lines)
+    def set_breakpoints(self, path, conds):
+        """Replace the breakpoints for a file.
+
+        `conds` maps 1-based lines to condition source text (or None for
+        an unconditional breakpoint). A plain iterable of lines is also
+        accepted and means "no conditions".
+        """
+        if isinstance(conds, dict):
+            self.breakpoints[str(path)] = dict(conds)
+        else:
+            self.breakpoints[str(path)] = {line: None for line in conds}
 
     def breakpoint_lines(self):
         return sorted(self.breakpoints.get(self.path, ()))
@@ -144,7 +163,9 @@ class Debugger:
             self._entered = True
             reason = 'entry'
         elif line in self.breakpoints.get(self._frame_path(frame), ()):
-            reason = 'breakpoint'
+            cond = self.breakpoints[self._frame_path(frame)][line]
+            if self._condition_holds(frames, ins, cond):
+                reason = 'breakpoint'
         elif self._step == 'in':
             reason = 'step'
         elif self._step == 'over' and depth <= self._step_depth:
@@ -154,11 +175,56 @@ class Debugger:
         if reason is not None:
             self._pause(reason, frames, ins)
 
-    def _pause(self, reason, frames, ins):
+    def _condition_holds(self, frames, ins, cond):
+        """True when a reached breakpoint should actually stop.
+
+        No condition (or a blank one) means unconditional: stop, today's
+        behavior. Otherwise the condition is evaluated against the current
+        frames exactly like the `evaluate` request (typechecked against
+        the locals, run on a fresh VM with an instruction budget), and we
+        stop only when the result is truthy -- the same `bool()` test the
+        VM uses for `if`.
+
+        A condition that fails to parse, typecheck, or evaluate must not
+        silently swallow the breakpoint or kill the session: the error is
+        surfaced as a warning and we stop anyway, so the user sees both
+        the stop and what went wrong.
+        """
+        if not cond or not str(cond).strip():
+            return True
+        # evaluate() reads the paused snapshot, so build one temporarily
+        # (we are on the VM thread here; nothing else can be paused) and
+        # clear it again unless we stop.
+        with self._lock:
+            self._paused = self._snapshot(frames, ins)
+        try:
+            ok, value = self.evaluate_value(str(cond), 0)
+        except Exception as e:  # evaluate must never raise out of here
+            ok, value = False, f'condition check crashed: {e}'
+        finally:
+            with self._lock:
+                self._paused = None
+        if not ok:
+            self.on_output(f'Niko warning: breakpoint condition '
+                           f'"{cond}" failed: {value}\n')
+            return True
+        try:
+            return bool(value)
+        except Exception as e:
+            self.on_output(f'Niko warning: breakpoint condition '
+                           f'"{cond}" failed: {e}\n')
+            return True
+
+    def _snapshot(self, frames, ins):
+        """Outermost-first snapshot list, as stored in `self._paused`."""
         snap = []
         for fr in frames:
             ln = fr.code[fr.ip - 1].line if fr.ip > 0 else ins.line
             snap.append((fr.name, dict(fr.env), ln, self._frame_path(fr)))
+        return snap
+
+    def _pause(self, reason, frames, ins):
+        snap = self._snapshot(frames, ins)
         with self._lock:
             self._paused = snap
             self._stop_reason = reason
@@ -236,6 +302,14 @@ class Debugger:
         anything. The paused program's own state is untouched except for
         side effects the expression itself performs.
         """
+        ok, value = self.evaluate_value(expr_text, frame_index)
+        if not ok:
+            return False, value
+        return True, describe_value(value)
+
+    def evaluate_value(self, expr_text, frame_index=0):
+        """Like evaluate(), but returns the raw value instead of rendering
+        it. Used by conditional breakpoints for the truthiness test."""
         from .parser import parse_expr, ParseError
         from .ast import Program, SetStmt
         stack = self.stack()
@@ -272,7 +346,7 @@ class Debugger:
             vm.run_module(module, eval_env)
         except NikoRuntimeError as e:
             return False, str(e)
-        return True, describe_value(eval_env.get('__evalresult'))
+        return True, eval_env.get('__evalresult')
 
 
 class _OutputForwarder(io.TextIOBase):

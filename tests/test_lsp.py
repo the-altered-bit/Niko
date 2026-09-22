@@ -163,7 +163,13 @@ try:
     proj = pathlib.Path(fixture) / 'proj'
     (proj / 'lib').mkdir(parents=True)
     (proj / 'lib' / 'math.niko').write_text(
-        'to add with a, b:\n    give back a + b\n\nset tau to 6.28\n',
+        '# add(a, b)\n'
+        '# Add two numbers together.\n'
+        'to add with a, b:\n'
+        '    give back a + b\n'
+        '\n'
+        '# tau: the circle constant, 2 * pi.\n'
+        'set tau to 6.28\n',
         encoding='utf8')
     main_src = (
         'import "lib/math.niko" as m\n'
@@ -224,15 +230,15 @@ try:
         assert loc is not None and loc['uri'] == math_uri \
             and loc['range']['start']['line'] == 0, loc
 
-        # m.add -> `to add` in the module file (0-based line 0)
+        # m.add -> `to add` in the module file (0-based line 2)
         loc = goto(main_uri, 4, 7)
         assert loc is not None and loc['uri'] == math_uri \
-            and loc['range']['start']['line'] == 0, loc
+            and loc['range']['start']['line'] == 2, loc
 
-        # m.tau -> `set tau` in the module file (0-based line 3)
+        # m.tau -> `set tau` in the module file (0-based line 6)
         loc = goto(main_uri, 5, 7)
         assert loc is not None and loc['uri'] == math_uri \
-            and loc['range']['start']['line'] == 3, loc
+            and loc['range']['start']['line'] == 6, loc
 
         # cursor on the alias itself -> the import line (single-file)
         loc = goto(main_uri, 4, 4)
@@ -258,8 +264,42 @@ try:
         loc = goto(main_uri, 7, 6)
         assert loc is None, loc
 
+        # --- Alpha 21: cross-file hover --------------------------------
+        def hover(uri, line, char):
+            return client2.request('textDocument/hover', {
+                'textDocument': {'uri': uri},
+                'position': {'line': line, 'character': char}})
+
+        # hovering `add` in `m.add(...)` shows the signature and doc
+        # comment from the module file
+        hov = hover(main_uri, 4, 7)
+        assert hov is not None, 'no hover for m.add'
+        val = hov['contents']['value']
+        assert 'add(a, b)' in val, val
+        assert 'Add two numbers together.' in val, val
+
+        # hovering `tau` in `m.tau` shows its inferred type and doc
+        hov = hover(main_uri, 5, 7)
+        assert hov is not None, 'no hover for m.tau'
+        val = hov['contents']['value']
+        assert '**tau**' in val and 'number' in val, val
+        assert 'circle constant' in val, val
+
+        # pkg: import hover works through the lockfile pin
+        hov = hover(main_uri, 6, 7)
+        assert hov is not None, 'no hover for h.greet'
+        assert 'greet(who)' in hov['contents']['value'], hov
+
+        # hovering the alias itself still resolves locally (module value)
+        hov = hover(main_uri, 4, 4)
+        assert hov is not None and '**m**' in hov['contents']['value'], hov
+
+        # missing module: no crash, null hover
+        assert hover(main_uri, 7, 6) is None
+
         client2.request('shutdown', {})
         print('test_lsp.py (Alpha 17): cross-file definition assertions passed')
+        print('test_lsp.py (Alpha 21): cross-file hover assertions passed')
     finally:
         client2.close()
         if old_cache is None:

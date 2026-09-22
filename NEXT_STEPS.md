@@ -194,6 +194,28 @@ match cases in `tests/test_formatter.py`.
   `tests/test_repl.py` (20 checks, scripted stdin into real `niko2 repl`
   subprocesses, hermetic). Full suite green. See
   `RELEASE_NOTES_ALPHA20.md` / `ALPHA20_DESIGN.md`.
+- **Alpha 21 is complete**: tooling polish batch. **Parser**: `to name:
+  -> type:` and `to name with x: -> type:` now parse — the trailing colon
+  is the block opener, never part of the identifier (only headers that
+  previously produced uncallable functions changed, so no behavior
+  regressions possible); typed params and mid-string colons untouched;
+  line numbers preserved. **Debugger**: DAP `setBreakpoints` honors the
+  `condition` field — evaluated in the paused frame's context via the
+  Alpha 18 `evaluate` machinery, stops only when truthy; bad conditions
+  emit `Niko warning: breakpoint condition "…" failed: <reason>` and the
+  breakpoint stops as if unconditional (stop-anyway fallback); the
+  session never dies or hangs. **LSP**: `textDocument/hover` follows
+  imports like go-to-definition does (signature + `#` doc comment from
+  the module file; `pkg:` imports included; unresolvable → null hover).
+  **Cut**: `use` under the debugger — pre-loading used files would
+  produce a wrong session (ambiguous frames, un-attributable
+  breakpoints); the real fix is routing `use` through the module
+  pipeline with `__use$K` wrapper prefixes (reusing Alpha 18's
+  attribution scheme), a future sprint. Tests: new
+  `tests/test_function_header.py`,
+  `tests/niko2_cases/function_colon.niko` (+`.out`), 4 new conditional
+  breakpoint DAP cases, new cross-file hover LSP assertions. Full suite
+  green. See `RELEASE_NOTES_ALPHA21.md`.
 - **Alpha 19 is complete**: package registry + version-range solving.
   `niko2/semver.py` (range grammar: `*`, exact, partials, npm-style
   `^`/`~`, comparators, comma AND; `max_satisfying` solver,

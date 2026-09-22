@@ -169,8 +169,9 @@ it's formatting/diagnosing is closer to feature-complete.
 - **The VS Code extension is not on the Marketplace.** Install
   `editors/vscode/niko-0.7.0.vsix` via *Extensions: Install from
   VSIX…*.
-- Future debugger work: conditional breakpoints, `use`-import support,
-  and data breakpoints / logpoints.
+- Future debugger work: `use`-import support (needs `use` routed through
+  the module pipeline with `__use$K` wrapper prefixes — see Alpha 21), and
+  data breakpoints / logpoints.
 
 ## Alpha 8 WASM backend limits
 
@@ -222,14 +223,7 @@ generated code). Same value model as WASM (boxed values, f64 numbers).
 
 ## Alpha 13 modules limits
 
-- **The language server follows `import` for go-to-definition (Alpha 17) but
-  is otherwise single-file.** `niko2 lsp` jumps from `alias.name` to the
-  top-level `set`/`to` in the module file, and from an import's path
-  string to the module file itself — resolved through the same search
-  path as the compiler (file dir → `NIKO_PATH` → bundled stdlib → cwd →
-  package cache). Hover and diagnostics still analyze one file at a time
-  (hover doesn't follow imports; `import` aliases check as `map` so
-  nothing breaks).
+- **The language server follows `import` for go-to-definition AND hover (Alpha 17/21) but diagnostics are otherwise single-file.** `niko2 lsp` jumps from `alias.name` to the top-level `set`/`to` in the module file, and from an import's path string to the module file itself — resolved through the same search path as the compiler (file dir → `NIKO_PATH` → bundled stdlib → cwd → package cache). Hover on `alias.name` shows the signature and doc comment from the module file. Diagnostics still analyze one file at a time (`import` aliases check as `map` so nothing breaks).
 - **Module search path exists; the package manager shipped in Alpha 16.**
   `import` resolves: importing file's dir → `NIKO_PATH` dirs → bundled
   stdlib (`stdlib/…` paths) → cwd; a local/`NIKO_PATH` `stdlib/` tree

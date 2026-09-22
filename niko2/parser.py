@@ -205,6 +205,11 @@ def parse_stmt(lines,i,ind):
     if text.startswith('to '):
         require_colon(lines[i],line_no); head=text[3:-1].strip(); ret=None
         if ' -> ' in head: head,ret=head.rsplit(' -> ',1)
+        # A block-opener colon may sit right before the return-type arrow
+        # ("to name: -> type:") or at the end of the params ("to name with
+        # x: -> type:"); it is never part of an identifier, so drop one.
+        head=head.rstrip()
+        if head.endswith(':'): head=head[:-1].rstrip()
         if ' with ' in head: name,ps=head.split(' with ',1); params=[p.strip() for p in split_top(ps) if p.strip()]
         else: name=head; params=[]
         body,j=child_block(lines,i+1,ind); return FunctionDef(line_no,name,params,ret,body),j

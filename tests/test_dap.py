@@ -432,3 +432,179 @@ def test_ask_timeout_fallback():
 test_multifile_debugging()
 test_ask_under_debugger()
 test_ask_timeout_fallback()
+
+
+# ---------------------------------------------------------------------------
+# Alpha 21: conditional breakpoints.
+#
+# A DAP `condition` on a breakpoint is evaluated in the paused frame's
+# context at hit time; the breakpoint stops only when it is truthy. A
+# missing or blank condition is unconditional (the old behavior). A
+# condition that fails to parse/typecheck/evaluate surfaces a warning
+# and stops anyway -- the session never dies or hangs on a bad condition.
+
+COND_PROGRAM = '''set i to 0
+repeat 5 times:
+    set i to i + 1
+    say "i", i
+say "done"
+'''
+
+
+def test_conditional_breakpoint():
+    """The breakpoint fires exactly when the condition is true."""
+    workdir, shutil = _alpha18_workdir()
+    try:
+        prog = workdir / 'cond.niko'
+        prog.write_text(COND_PROGRAM)
+        prog_p = str(prog.resolve())
+        client = TimedClient()
+        try:
+            client.request('initialize', {'adapterID': 'niko-test'})
+            client.wait_event('initialized')
+            client.request('launch', {'program': prog_p})
+            bp = client.request('setBreakpoints', {
+                'source': {'name': 'cond.niko', 'path': prog_p},
+                'breakpoints': [{'line': 4, 'condition': 'i == 3'}]})
+            assert bp['breakpoints'] == [{'verified': True, 'line': 4}], bp
+            client.request('configurationDone')
+
+            # exactly one stop: the iteration where i == 3
+            stopped = client.wait_event('stopped')
+            assert stopped['reason'] == 'breakpoint', stopped
+            trace = client.request('stackTrace', {'threadId': 1})
+            assert trace['stackFrames'][0]['line'] == 4, trace
+            scopes = client.request('scopes', {'frameId': 0})
+            variables = client.request(
+                'variables',
+                {'variablesReference': scopes['scopes'][0]['variablesReference']})
+            by_name = {v['name']: v for v in variables['variables']}
+            assert by_name['i']['value'] == '3', by_name['i']
+
+            client.request('continue')
+            client.wait_event('continued')
+            client.wait_event('terminated')
+            # no second stop: every other iteration's condition was false
+            assert not [m for m in client.stash
+                        if m.get('type') == 'event'
+                        and m.get('event') == 'stopped'], client.stash
+            outs = client.outputs()
+            for n in range(1, 6):
+                assert any(f'i {n}' in o for o in outs), outs
+
+            client.request('disconnect')
+            print('test_dap.py (Alpha 21): conditional breakpoint passed')
+        finally:
+            client.close()
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def test_conditional_breakpoint_never_true():
+    """A condition that is never true stops never; the program just runs."""
+    workdir, shutil = _alpha18_workdir()
+    try:
+        prog = workdir / 'cond.niko'
+        prog.write_text(COND_PROGRAM)
+        prog_p = str(prog.resolve())
+        client = TimedClient()
+        try:
+            client.request('initialize', {'adapterID': 'niko-test'})
+            client.wait_event('initialized')
+            client.request('launch', {'program': prog_p})
+            client.request('setBreakpoints', {
+                'source': {'name': 'cond.niko', 'path': prog_p},
+                'breakpoints': [{'line': 4, 'condition': 'i == 99'}]})
+            client.request('configurationDone')
+
+            client.wait_event('terminated')
+            assert not [m for m in client.stash
+                        if m.get('type') == 'event'
+                        and m.get('event') == 'stopped'], client.stash
+            assert any('i 5' in o for o in client.outputs()), client.outputs()
+
+            client.request('disconnect')
+            print('test_dap.py (Alpha 21): never-true condition passed')
+        finally:
+            client.close()
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def test_conditional_breakpoint_bad_condition():
+    """A broken condition surfaces a warning and stops anyway; the
+    session survives to termination."""
+    workdir, shutil = _alpha18_workdir()
+    try:
+        prog = workdir / 'cond.niko'
+        prog.write_text(COND_PROGRAM)
+        prog_p = str(prog.resolve())
+        client = TimedClient()
+        try:
+            client.request('initialize', {'adapterID': 'niko-test'})
+            client.wait_event('initialized')
+            client.request('launch', {'program': prog_p})
+            client.request('setBreakpoints', {
+                'source': {'name': 'cond.niko', 'path': prog_p},
+                'breakpoints': [{'line': 4, 'condition': 'i =='}]})
+            client.request('configurationDone')
+
+            stops = 0
+            for _ in range(5):
+                stopped = client.wait_event('stopped')
+                assert stopped['reason'] == 'breakpoint', stopped
+                stops += 1
+                if stops == 1:
+                    # the failure is surfaced as a plain-English warning,
+                    # not a crash
+                    assert any('breakpoint condition' in o
+                               for o in client.outputs()), client.outputs()
+                client.request('continue')
+                client.wait_event('continued')
+            assert stops == 5, stops
+            client.wait_event('terminated')
+
+            client.request('disconnect')
+            print('test_dap.py (Alpha 21): bad condition fallback passed')
+        finally:
+            client.close()
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def test_blank_condition_is_unconditional():
+    """An empty-string condition behaves like no condition at all."""
+    workdir, shutil = _alpha18_workdir()
+    try:
+        prog = workdir / 'cond.niko'
+        prog.write_text(COND_PROGRAM)
+        prog_p = str(prog.resolve())
+        client = TimedClient()
+        try:
+            client.request('initialize', {'adapterID': 'niko-test'})
+            client.wait_event('initialized')
+            client.request('launch', {'program': prog_p})
+            client.request('setBreakpoints', {
+                'source': {'name': 'cond.niko', 'path': prog_p},
+                'breakpoints': [{'line': 4, 'condition': ''}]})
+            client.request('configurationDone')
+
+            for _ in range(5):
+                stopped = client.wait_event('stopped')
+                assert stopped['reason'] == 'breakpoint', stopped
+                client.request('continue')
+                client.wait_event('continued')
+            client.wait_event('terminated')
+
+            client.request('disconnect')
+            print('test_dap.py (Alpha 21): blank condition passed')
+        finally:
+            client.close()
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+test_conditional_breakpoint()
+test_conditional_breakpoint_never_true()
+test_conditional_breakpoint_bad_condition()
+test_blank_condition_is_unconditional()

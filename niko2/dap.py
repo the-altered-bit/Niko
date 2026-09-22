@@ -5,7 +5,9 @@ VS Code (via the bundled Niko extension) or any DAP-capable client:
 
 - `launch` with a `program` path, optional `stopOnEntry`
 - `setBreakpoints` (line breakpoints, verified; works in the entry file
-  and in any imported module)
+  and in any imported module; DAP `condition` fields are honored -- the
+  condition is evaluated against the paused frame's locals at hit time
+  and the breakpoint stops only when it is truthy)
 - `continue`, `next` (step over), `stepIn`, `stepOut`
 - `threads`, `stackTrace` (each frame carries its own file, so the editor
   opens imported modules), `scopes`, `variables` (locals, with one level
@@ -213,16 +215,27 @@ class Adapter:
     def _on_setBreakpoints(self, req, args):
         source = args.get('source', {})
         path = os.path.abspath(source.get('path', ''))
-        lines = [b['line'] for b in args.get('breakpoints', []) if 'line' in b]
+        # Alpha 21: DAP SourceBreakpoint `condition` fields. A missing or
+        # blank condition is unconditional (the behavior so far); a
+        # non-blank one is evaluated in the paused frame's context at hit
+        # time and stops only when truthy.
+        conds = {}
+        for b in args.get('breakpoints', []):
+            if 'line' not in b:
+                continue
+            cond = b.get('condition')
+            if cond is not None and not str(cond).strip():
+                cond = None
+            conds[b['line']] = cond
         if self.debugger is None:
             self._fail(req, 'no active launch')
             return
         # Breakpoints may target the launch program or any module it
         # imports: the debugger maps each paused frame back to its source
         # file (Alpha 18), so cross-file breakpoints hit.
-        self.debugger.set_breakpoints(path, lines)
+        self.debugger.set_breakpoints(path, conds)
         self._respond(req, {'breakpoints': [
-            {'verified': True, 'line': ln} for ln in lines]})
+            {'verified': True, 'line': ln} for ln in sorted(conds)]})
 
     def _on_configurationDone(self, req, args):
         if self.debugger is None:
