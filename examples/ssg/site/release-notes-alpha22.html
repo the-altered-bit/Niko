@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 22 release notes (2026-09-22) — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 22 release notes (2026-09-22)</h1>
+<p><strong><code>use</code> is a first-class citizen now.</strong> Previously <code>use "file.niko"</code> was a VM-only side path bolted on outside the module system: it didn't work on WASM or native at all, silently ignored dependency cycles, and the debugger and language server didn't know about it. Alpha 22 routes <code>use</code> through the same module pipeline as <code>import</code> — the graph builder, the per-module typechecker, and the desugar-to-one-Program step — so everything that works for imports now works for <code>use</code>, byte-identically on all three backends.</p>
+<h2>What changed</h2>
+<ul>
+<li><strong><code>use</code> works on VM, WASM, and native, byte-identically.</strong> The old</li>
+</ul>
+<p><code>CompileError("...doesn't support 'use' yet")</code> on the WASM/native backends is gone. A program with <code>use</code> compiles and runs the same on all three.</p>
+<ul>
+<li><strong><code>use</code> semantics, in one paragraph.</strong> <code>use "path/to/file.niko"</code></li>
+</ul>
+<p>merges the used file's top-level names into your scope (no alias, unlike <code>import ... as</code>). Used files run before the entry body; every used file's top-level code runs exactly once, even with diamond or repeated <code>use</code>s. On name conflicts the <em>later</em> <code>use</code> wins, and your entry file's own <code>set</code>s/<code>to</code>s always win over used names. <code>use</code> composes transitively (a used file can <code>use</code> another file), and functions defined in used files — including nested closures — work from the entry file. A <code>use</code> cycle (<code>a</code> uses <code>b</code>, <code>b</code> uses <code>a</code>) is now a compile error that names the loop (<code>use cycle: a.niko -&gt; b.niko -&gt; a.niko</code>) with a caret, instead of silently recursing. Using a missing file, <code>import</code> inside a used file, and <code>use</code> inside an imported file are compile errors with carets. Builtin names (<code>use "math"</code>) stay no-ops everywhere, as before.</p>
+<ul>
+<li><strong>Debugger support.</strong> Breakpoints inside used files verify and hit;</li>
+</ul>
+<p>stepping into a used function lands on the right file/line; stack frames attribute to the used file; locals (including closure variables from the used file) are inspectable.</p>
+<ul>
+<li><strong>LSP support.</strong> Go-to-definition on a used name jumps to the</li>
+</ul>
+<p>top-level <code>set</code>/<code>to</code> in the used file; the <code>use</code> path string jumps to the used file itself; hover shows the signature and doc comment from the used file. Unresolvable uses yield null, never an error.</p>
+<ul>
+<li><strong>REPL.</strong> <code>use</code> in <code>niko2 repl</code> now goes through the shared pipeline</li>
+</ul>
+<p>(the old separate loader is gone); used names stay visible across chunks and init-once semantics hold.</p>
+<h2>Known limits (not fixed this alpha)</h2>
+<ul>
+<li>Editor <em>diagnostics</em> (the red squiggles) still flag used names as</li>
+</ul>
+<p>unknown — the LSP's live checker doesn't know <code>use</code>-merged names yet (same pre-existing pattern as <code>import</code> aliases). Go-to-definition and hover work anyway.</p>
+<ul>
+<li><code>niko2 format</code> renders <code>use "a.niko"</code> as <code>use '"a.niko"'</code> (doubled</li>
+</ul>
+<p>quotes) — a pre-existing formatter quirk.</p>
+<ul>
+<li><code>use</code> inside a function body keeps its old behavior (silently</li>
+</ul>
+<p>ignored on the VM).</p>
+<h2>Tests</h2>
+<ul>
+<li><code>tests/test_use_pipeline.py</code> (new, 13 checks): 3-way differential</li>
+</ul>
+<p>(VM/WASM/native byte-identical) for basic use, transitive use, diamond init-once, conflict resolution, nested functions in used files, and builtin <code>use "math"</code>; builtin-wins-over-file; error cases with carets (<code>use</code> cycle incl. self-cycle, missing file, <code>import</code> inside a used file, <code>use</code> inside an imported module); typecheck-error attribution to the used file/line.</p>
+<ul>
+<li><code>tests/test_dap.py</code>: new <code>test_use_under_debugger</code> — breakpoint</li>
+</ul>
+<p>inside a used file verifies + hits with the right file/line, step into a used function, step out back to the entry, closure locals inspectable, used-file breakpoint fires on a later call.</p>
+<ul>
+<li><code>tests/test_lsp.py</code>: go-to-definition on a used name → the used</li>
+</ul>
+<p>file's <code>set</code>/<code>to</code>, on the <code>use</code> path string → the used file, entry's own <code>set</code> wins over the used file's, missing use → null; hover shows signature + doc comment; the diagnostics gap is asserted as current behavior.</p>
+<ul>
+<li><code>tests/test_repl.py</code>: new <code>use-in-repl</code> case — used names visible</li>
+</ul>
+<p>across chunks, top-level <code>say</code> runs exactly once.</p>
+<h2>Docs</h2>
+<ul>
+<li><code>ALPHA22_DESIGN.md</code> (new, with "As built"), <code>NIKO_AI_HANDOFF.md</code></li>
+</ul>
+<p>(item 16), <code>NEXT_STEPS.md</code> (Alpha 22 complete), <code>niko2/KNOWN_LIMITATIONS.md</code> (fixed bullets removed; the LSP diagnostics gap added).</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

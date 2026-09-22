@@ -1,0 +1,43 @@
+# ssg.niko — niko-ssg: a static site generator written in Niko.
+#
+# Reads the page list from pages.txt (one source path per line, relative
+# to the repository root), converts each Markdown doc to HTML with
+# markdown.niko, wraps it in layout.html, and writes the site into
+# examples/ssg/site/. Run it with ./build.sh from this directory.
+
+import "markdown.niko" as markdown
+import "pages.niko" as pagekit
+
+set ROOT to "examples/ssg"
+set SITE to ROOT + "/site"
+
+to build_site:
+    set manifest to read_lines(ROOT + "/pages.txt")
+    set layout to read_file(ROOT + "/layout.html")
+    set site_pages to []
+    for each line in manifest:
+        set src to trim(line)
+        if src is "":
+            skip
+        set md to read_file(src)
+        set title to markdown.page_title(md)
+        set nav_title to markdown.escape_html(markdown.plain_title(title))
+        set slug to pagekit.slug_for(src)
+        put {"source": src, "slug": slug, "title": title, "nav_title": nav_title, "html": markdown.markdown_to_html(md)} in site_pages
+    set nav to pagekit.build_nav(site_pages)
+    for each p in site_pages:
+        set page to replace(layout, "{{title}}", p["nav_title"])
+        set page to replace(page, "{{nav}}", nav)
+        set page to replace(page, "{{content}}", p["html"])
+        write_file(SITE + "/" + p["slug"] + ".html", page)
+        say "wrote " + p["slug"] + ".html"
+    set index_page to replace(layout, "{{title}}", "Niko 2.0 documentation")
+    set index_page to replace(index_page, "{{nav}}", nav)
+    set index_page to replace(index_page, "{{content}}", pagekit.build_index_content(site_pages))
+    write_file(SITE + "/index.html", index_page)
+    say "wrote index.html"
+    write_file(SITE + "/style.css", read_file(ROOT + "/style.css"))
+    say "wrote style.css"
+    say "done: " + text(length of site_pages) + " pages"
+
+build_site()

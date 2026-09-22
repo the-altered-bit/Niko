@@ -339,6 +339,51 @@ match cases in `tests/test_formatter.py`.
   Tests: `tests/test_assert.py`, `tests/test_test_runner.py` (22);
   worked example `examples/testing/`. Full suite green. See
   `RELEASE_NOTES_ALPHA27.md` / `ALPHA27_DESIGN.md`.
+- **Alpha 28 is complete**: dogfood sprint — `niko-ssg`, a static site
+  generator written entirely in Niko (`examples/ssg/`). No new syntax,
+  no new builtins, no network. `ssg.niko` reads `pages.txt`, converts
+  each doc with `markdown.niko` (pure Niko, no imports; subset:
+  `#`–`###` headings with trailing space, space-joined paragraphs,
+  fenced code with optional language → `<pre><code
+  class="language-x">` (unclosed fence runs to EOF), inline code,
+  bold/italic incl. nesting, `[label](url)` links, `- ` lists,
+  `---` → `<hr>`; tables/blockquotes/ordered lists render as literal
+  escaped paragraphs — deliberate pragmatic cut, spec'd in
+  `examples/ssg/README.md`), applies `layout.html`
+  (`{{title}}`/`{{nav}}`/`{{content}}`), writes `site/<slug>.html` +
+  `site/index.html`, copies `style.css`. `pages.niko` holds
+  slug/nav/index helpers reusing `stdlib/text.niko`'s `slugify`
+  (first real stdlib use from user code). `build.sh` writes
+  `pages.txt` by globbing `RELEASE_NOTES_ALPHA*.md` and runs the
+  generator from the repo root (26 pages: STDLIB.md, NIKO_AI_BRIEF.md,
+  24 release-notes files; ~39s). `site/` + `pages.txt` are build
+  output — recommendation: gitignore, don't commit (`site/` not yet in
+  `.gitignore`). First in-repo suite written in Niko itself:
+  `markdown_test.niko` (26) + `pages_test.niko` (4) →
+  `niko2 test examples/ssg/` gives 30 passed, 0 failed. Three language
+  bugs found by dogfooding, all fixed (~30 lines total, line numbers
+  preserved): (1) `niko2/parser.py` `parse_if` — sequential `if`s were
+  swallowed as one if/elif chain (second body silently never ran;
+  also broke `if` blocks ending in a nested `if`) — continuation loop
+  now only accepts same-indent `otherwise if` / `otherwise:`; (2)
+  `niko2/modules.py` `check_units` — forward references failed inside
+  imported modules (only the entry pre-defined its own top-level
+  names) — every unit now pre-defines its own top-level names
+  (mutual recursion verified at runtime); (3) `niko2/closures.py` —
+  nested closure reading a builtin-shadowed name bound by an enclosing
+  function got the builtin (broke `import "stdlib/text.niko" as text`
+  inside a module) — capture analysis walks up for an enclosing
+  binding first, only truly unbound names skip capture; Alpha 10's
+  pinned rule preserved and pinned by a test. Known limits (in
+  `niko2/KNOWN_LIMITATIONS.md` under "Alpha 28 dogfood notes"):
+  `and`/`or` do not short-circuit — both sides always evaluated on all
+  backends, a real semantic divergence from Niko 1 (guard idioms raise;
+  the converter uses nested `if`s; fixing needs jump-based codegen in
+  VM+WASM+native — a future sprint); runtime errors inside imported
+  modules report the entry file's path. Tests: new
+  `tests/test_dogfood.py` (12 cases, 3-way VM/WASM/native
+  differential). Full suite green. See `RELEASE_NOTES_ALPHA28.md` /
+  `ALPHA28_DESIGN.md`.
 - **Alpha 19 is complete**: package registry + version-range solving.
   `niko2/semver.py` (range grammar: `*`, exact, partials, npm-style
   `^`/`~`, comparators, comma AND; `max_satisfying` solver,

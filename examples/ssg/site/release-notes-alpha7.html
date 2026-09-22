@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 Alpha 7 — release notes — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 Alpha 7 — release notes</h1>
+<p>Alpha 7 is the <strong>tooling</strong> release: a language server, a VS Code extension, and a debug adapter. No language changes — every <code>.niko</code> program that ran under Alpha 6 runs identically. Everything below is implemented and covered by tests.</p>
+<h2>Language server — <code>niko2 lsp</code></h2>
+<p>A Language Server Protocol server over stdio (<code>niko2/lsp.py</code>), sharing a tiny JSON-RPC framing module with the debugger (<code>niko2/jsonrpc.py</code>):</p>
+<ul>
+<li><strong>Diagnostics as you type</strong> — parse errors and type errors published</li>
+</ul>
+<p>via <code>textDocument/publishDiagnostics</code>, reusing the Alpha 5 line/column/caret diagnostics, so editors get the same messages and positions as <code>niko2 check</code>.</p>
+<ul>
+<li><strong>Completion</strong> — keywords, every builtin (the list is imported from</li>
+</ul>
+<p>the checker's new module-level <code>BUILTIN_NAMES</code>, so it can't drift), and names defined in the file.</p>
+<ul>
+<li><strong>Hover</strong> — builtin docs, plus inferred types for your own names</li>
+</ul>
+<p>(<code>set total: number to 0</code> → <code>total (var): number</code>).</p>
+<ul>
+<li><strong>Go-to-definition</strong> — jumps to where a variable or function was</li>
+</ul>
+<p>defined.</p>
+<ul>
+<li><strong>Format document</strong> — runs the Alpha 5 formatter over the whole file.</li>
+</ul>
+<p>Hover and go-to-definition are line-oriented: AST nodes carry line numbers but not columns, so results resolve to the nearest sensible line. The symbol walk lives in <code>niko2/symbols.py</code> and is shared by all three features.</p>
+<p>Tests: <code>tests/test_lsp.py</code> spawns the real server and speaks LSP — initialize, didOpen (one diagnostic on the right line), completion, hover (builtin + user name), definition, formatting, didChange (errors clear), shutdown.</p>
+<h2>VS Code extension — <code>editors/vscode/</code></h2>
+<ul>
+<li><strong>Syntax highlighting</strong>: a TextMate grammar (<code>syntaxes/niko.tmLanguage.json</code>)</li>
+</ul>
+<p>covering comments, strings, numbers, keywords, operators (<code>is</code>, <code>and</code>, <code>or</code>, …), constants (<code>yes</code>/<code>no</code>/<code>nothing</code>), builtins, function definitions, and type annotations. Types only highlight in annotation position (<code>: number</code>, <code>list&lt;number&gt;</code>) — a variable <em>named</em> <code>result</code> stays plain, and <code>number("42")</code> still highlights as a builtin call.</p>
+<ul>
+<li><strong>Language client</strong> (<code>client/extension.js</code>): launches <code>niko2 lsp</code> via</li>
+</ul>
+<p><code>vscode-languageclient</code>; the Python is configurable as <code>niko.pythonPath</code>.</p>
+<ul>
+<li><strong>Debugging</strong>: contributes a <code>niko</code> debug type that launches</li>
+</ul>
+<p><code>niko2 debug</code>; F5 on a <code>.niko</code> file just works.</p>
+<ul>
+<li><strong>Packaged</strong>: <code>editors/vscode/niko-0.7.0.vsix</code> (629 KB) — install with</li>
+</ul>
+<p><em>Extensions: Install from VSIX…</em>. Not yet published to the Marketplace.</p>
+<ul>
+<li><strong>Grammar tests</strong>: <code>editors/vscode/test-grammar.js</code> tokenizes sample</li>
+</ul>
+<p>lines with the real TextMate engine and asserts scopes (<code>node test-grammar.js</code> after a throwaway <code>npm install</code>).</p>
+<h2>Debug adapter — <code>niko2 debug</code></h2>
+<p>A Debug Adapter Protocol server over stdio (<code>niko2/dap.py</code>) on top of a small debugger core (<code>niko2/debug.py</code>):</p>
+<ul>
+<li>The VM gained a per-instruction hook (<code>vm.trace_fn</code>, off by default —</li>
+</ul>
+<p>zero overhead when not debugging). The debugger pauses on breakpoints and implements step-over/in/out at <strong>one-source-line granularity</strong>: a line compiling to several instructions pauses once, not per instruction.</p>
+<ul>
+<li>Supported: <code>launch</code> (with <code>stopOnEntry</code>), <code>setBreakpoints</code> (verified),</li>
+</ul>
+<p><code>continue</code>, <code>next</code>, <code>stepIn</code>, <code>stepOut</code>, <code>threads</code>, <code>stackTrace</code>, <code>scopes</code>, <code>variables</code> (locals, with one level of list/record expansion), <code>disconnect</code>. The program's <code>say</code> output arrives as <code>output</code> events; <code>terminated</code> ends the session.</p>
+<ul>
+<li>Tests: <code>tests/test_dap.py</code> speaks real DAP — breakpoint hit three</li>
+</ul>
+<p>times, stack/variables inspection (<code>total</code> is <code>1</code> at the first hit), step-over landing on the loop header, output events, clean termination. A direct <code>Debugger</code> check also verified step-in lands inside the called function and step-out returns.</p>
+<h2>Limits (honest, Alpha 7)</h2>
+<ul>
+<li>Debugging runs <strong>single-file programs</strong> (<code>use</code> imports aren't loaded).</li>
+<li><code>ask</code> for input isn't supported while debugging — the program would</li>
+</ul>
+<p>read from the debug protocol stream.</p>
+<ul>
+<li>Hover/go-to-definition are line-oriented (no column info in the AST).</li>
+<li>The VS Code extension isn't on the Marketplace yet; install the</li>
+</ul>
+<p><code>.vsix</code> manually.</p>
+<h2>Verification</h2>
+<ul>
+<li><code>tests/run_niko2_tests.py</code>: 12 niko2 cases, 0 failures</li>
+<li><code>tests/run_tests.py</code>: 26 niko1 cases, 0 failures (Niko 1 untouched</li>
+</ul>
+<p>and behavior-identical)</p>
+<ul>
+<li><code>tests/test_diagnostics.py</code>, <code>test_stdlib.py</code>, <code>test_generics.py</code>,</li>
+</ul>
+<p><code>test_results_match.py</code>, <code>test_formatter.py</code>, <code>test_project_deps.py</code>, <code>test_lsp.py</code>, <code>test_dap.py</code>: all pass</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

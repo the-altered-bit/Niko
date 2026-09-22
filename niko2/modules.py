@@ -336,10 +336,12 @@ def check_units(graph, entry_names=None):
     each direct use-unit's exports are pre-defined as `any` (builtin-name
     uses need nothing: the checker already knows every builtin). Errors
     inside a module are re-tagged with that module's path so diagnostics
-    render against the right source. `entry_names` overrides the entry
-    unit's pre-defined names (the REPL passes its accumulated chunk names
-    for forward references); by default the entry's own top-level names
-    are pre-defined.
+    render against the right source. Every unit's own top-level names are
+    pre-defined before its body is checked, so forward references work the
+    same in an imported module as they do in the entry script (Alpha 28:
+    modules previously rejected calls to functions defined later in the
+    same file). `entry_names` overrides the entry unit's pre-defined names
+    (the REPL passes its accumulated chunk names for forward references).
     """
     from .typecheck import Checker, MAP, ANY
     by_path = {unit.path: unit for unit in graph}
@@ -352,11 +354,13 @@ def check_units(graph, entry_names=None):
             if target is None:
                 continue
             c.import_names(exports[by_path[target].key])
-        if unit is graph[-1]:
-            if entry_names is None:
-                entry_names = [n.name for n in unit.tree.body
-                               if hasattr(n, 'name')]
-            c.import_names(entry_names)
+        # Alpha 28: every unit pre-defines its own top-level names, so a
+        # function may call another defined later in the same module file,
+        # exactly like the entry script already could.
+        own_names = [n.name for n in unit.tree.body if hasattr(n, 'name')]
+        if unit is graph[-1] and entry_names is not None:
+            own_names = entry_names
+        c.import_names(own_names)
         try:
             c.check(unit.tree)
         except TypeErrorNiko as e:

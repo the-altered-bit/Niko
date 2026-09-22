@@ -180,3 +180,28 @@ text and the line: `Line 4: Assertion failed: "math.add(0, 5) == 5" is
 not true.` The runner is VM-only; `assert` also works on the WASM
 backend (the native backend refuses it with a clean compile error).
 No fixtures, mocks, or coverage yet — see `RELEASE_NOTES_ALPHA27.md`.
+
+## Niko 2 Alpha 28 — dogfood sprint: `niko-ssg`
+
+A static site generator written entirely in Niko. `examples/ssg/`
+turns the project's own Markdown docs into a small website: `ssg.niko`
+reads a page manifest, `markdown.niko` (pure Niko, no imports)
+converts each doc with a pragmatic Markdown subset (`#`–`###`,
+paragraphs, fenced code, inline code, bold/italic, links, `- ` lists,
+`---` → `<hr>`), `pages.niko` builds slugs/nav/index using the
+stdlib's `slugify`, and `layout.html` wraps everything in
+`{{title}}`/`{{nav}}`/`{{content}}` placeholders.
+
+```bash
+cd examples/ssg && ./build.sh   # builds site/ from the repo's docs
+python -m niko2 test examples/ssg   # 30 passed, 0 failed
+```
+
+Dogfooding found and fixed three language bugs (~30 lines total):
+sequential `if`s being parsed as one if/elif chain, forward references
+failing inside imported modules, and nested closures reading builtins
+past shadowing bindings — each with regression tests. Two findings are
+documented limits: `and`/`or` don't short-circuit (both sides always
+evaluated), and runtime errors in imported modules report the entry
+file's path. See `RELEASE_NOTES_ALPHA28.md` / `ALPHA28_DESIGN.md`.
+`site/` is build output (regenerated, not committed).

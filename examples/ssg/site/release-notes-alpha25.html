@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</h1>
+<p>The VS Code extension was packaged once as <code>niko-0.7.0.vsix</code> back in Alpha 7 and never updated since. It predated multi-file modules, cross-file go-to-definition/hover, module-aware diagnostics, multi-file debugging, conditional breakpoints, <code>ask</code> under the debugger, and DAP <code>evaluate</code>. Alpha 25 brings the extension current and prepares the one step only a human can do: publishing to the Marketplace.</p>
+<h2>What changed</h2>
+<p><strong>Extension 0.7.0 → 0.25.0</strong> (<code>editors/vscode/</code>). The version now marks the extension current through Alpha 25 (the old 0.7.0 tracked Alpha 7). Publisher (<code>niko-lang</code>), id (<code>niko</code>), and engine requirement (<code>^1.80.0</code>) are unchanged.</p>
+<ul>
+<li><strong>Grammar</strong> (<code>syntaxes/niko.tmLanguage.json</code>): audited against the</li>
+</ul>
+<p>parser/checker. Added the list-mutation statements (<code>put</code>, <code>remove</code>, <code>add</code>, <code>take</code>), the syntactic markers <code>from</code>/<code>into</code>, the long-form comparison operators (<code>is bigger than</code>, <code>is smaller than</code>, <code>is at least</code>, <code>is at most</code>, <code>is in</code> — longest-first so <code>is in</code> isn't swallowed by <code>is</code>), and single-quoted strings (the lexer accepts <code>'...'</code>; the grammar only had double-quoted). The 48-name builtin list was verified programmatically against <code>niko2.typecheck.BUILTIN_NAMES</code> — no drift. <code>test-grammar.js</code> gained 17 token-scope cases plus a builtin-sync self-check and is green.</p>
+<ul>
+<li><strong>Packaging</strong>: <code>package.json</code> description now sells the real feature</li>
+</ul>
+<p>set (multi-file LSP + multi-file DAP with conditional breakpoints and evaluate); added the <code>inputTimeout</code> launch attribute (supported by <code>niko2 debug</code> since Alpha 18) and <code>activationEvents: ["onLanguage:niko"]</code> (modern <code>vsce</code> requires it when <code>main</code> is present — packaging failed without it). New <code>niko-0.25.0.vsix</code> (committed next to the old one per repo convention; the stale <code>niko-0.7.0.vsix</code> is removed).</p>
+<ul>
+<li><strong>README</strong>: fixed the stale "<code>use</code> imports are not loaded under the</li>
+</ul>
+<p>debugger" line (wrong since Alpha 22), accurate feature list (cross-file go-to-definition/hover, module-aware diagnostics, multi-file debugging, conditional breakpoints, evaluate), the <code>ask</code>-under-VS-Code caveat (stock VS Code doesn't answer the Niko-specific reverse <code>input</code> request, so <code>ask</code> yields <code>""</code> after the timeout), and updated install instructions for the new vsix filename.</p>
+<ul>
+<li><strong>PUBLISH.md</strong> (new): the publish runbook — publisher creation at the</li>
+</ul>
+<p>Marketplace publisher management page, PAT with the Marketplace "Manage" scope, <code>vsce publish</code> vs. manual upload, and how to verify the listing. Publishing itself is deliberately not done here: it needs the user's publisher account and token.</p>
+<h2>Verification</h2>
+<ul>
+<li><code>node test-grammar.js</code>: green (real TextMate engine).</li>
+<li>Scripted LSP session using the exact command the extension launches</li>
+</ul>
+<p>(<code>python3 -m niko2 lsp</code>) on a multi-file program (<code>import</code> + <code>use</code> + match guards/patterns): module-aware diagnostics, cross-file hover with inferred type + doc comment, go-to-definition on <code>lib.shout</code> and on the import path string, format-document — all green.</p>
+<ul>
+<li>Scripted DAP session using the exact command (`python3 -m niko2</li>
+</ul>
+<p>debug<code>): conditional breakpoint stopped exactly on the right iteration, stack frames spanned both files, evaluate returned the right value, and the reverse </code>input<code> request went unanswered (like stock VS Code) so </code>ask<code> yielded </code>""` after the timeout and the session terminated cleanly — all green.</p>
+<ul>
+<li>One clean headless VS Code run (<code>@vscode/test-electron</code> + xvfb,</li>
+</ul>
+<p>extension loaded as a dev extension): language registered, activated on <code>.niko</code> open, debug session started and terminated. Subsequent headless runs SIGSEGV'd inside the Electron binary itself (even <code>code --version</code> segfaults — a container issue, not the extension). Honest boundary: full in-IDE verification awaits a real VS Code.</p>
+<h2>What remains (user action)</h2>
+<p>Run <code>editors/vscode/PUBLISH.md</code>. Nobody but the user can create the publisher and token.</p>
+<p>Full suite green: 26 Niko 1 cases, 16 Niko 2 cases + nikoir round trip, all <code>tests/test_*.py</code>.</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

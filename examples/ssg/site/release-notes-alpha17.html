@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 17 release notes (2026-09-22) — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 17 release notes (2026-09-22)</h1>
+<p><strong>Go-to-definition follows your imports.</strong> The language server's <code>textDocument/definition</code> now jumps across files: put the cursor on <code>name</code> in <code>alias.name</code> and the editor opens the module file at the top-level <code>set</code>/<code>to</code> that defines it. Put the cursor on the path string in <code>import "path/to/file.niko" as alias</code> and the editor opens the module file itself.</p>
+<pre><code class="language-niko">import "lib/math.niko" as m
+
+say m.add(1, 2)   # go-to-definition on `add` -&gt; lib/math.niko, the `to add` line</code></pre>
+<h2>How it works</h2>
+<ul>
+<li><strong>One resolution rule everywhere.</strong> The LSP reuses</li>
+</ul>
+<p><code>niko2/modules.py</code>'s <code>resolve_import</code>, so the editor resolves exactly what the compiler resolves: the importing file's directory → <code>NIKO_PATH</code> dirs → the bundled stdlib (<code>stdlib/…</code> paths) → cwd → the package cache (<code>pkg:&lt;name&gt;/…</code> via the <code>niko.lock</code> pin, else the newest cached version). Relative <code>./</code> imports <em>inside</em> cached packages work too.</p>
+<ul>
+<li><strong>Two jump targets.</strong> Cursor on the quoted import path → the module file</li>
+</ul>
+<p>(first line). Cursor on the attribute in <code>alias.name</code> → the top-level <code>set</code> or <code>to</code> defining <code>name</code> in the module file (falling back to the file's first line when the module can't be parsed or doesn't define the name). Cursor on the alias itself still jumps to the <code>import</code> line, as before.</p>
+<ul>
+<li><strong>Unresolvable imports are quiet.</strong> A missing file or a bad <code>pkg:</code> spec</li>
+</ul>
+<p>yields no definition (the LSP <code>null</code> result) — never an error, never a crash — so a half-written import line doesn't break the editor.</p>
+<ul>
+<li><strong>Deliberate limits:</strong> definition still resolves to a line rather than an</li>
+</ul>
+<p>exact column range (Niko 2 AST nodes carry line numbers only); hover doesn't follow imports yet; one hop only (no transitive <code>alias.other.x</code> chains).</p>
+<p>Tests: extended <code>tests/test_lsp.py</code> — real LSP sessions over a multi-file fixture (definition on <code>m.add</code>/<code>m.tau</code> lands in the module file at the right line, the import string opens the module file, a <code>pkg:</code> import resolves through a lockfile pin, a <code>./</code> import inside the package reaches the sibling file, a missing module yields a graceful null, and the alias itself still jumps to the <code>import</code> line). Full suite green: 26 Niko 1 cases, 15 Niko 2 cases + nikoir round trip, all <code>tests/test_*.py</code>.</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

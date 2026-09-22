@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 12 release notes — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 12 release notes</h1>
+<p><strong>Match as an expression.</strong> <code>match</code> now produces a value: the value of the selected arm. Same semantics on all three backends, byte-identical.</p>
+<h2>New syntax</h2>
+<pre><code>set grade to match score:
+    when n if n is at least 90:
+        "honors"
+    when n if n is at least 50:
+        "pass"
+    otherwise:
+        "fail"
+say grade</code></pre>
+<p>A match expression can appear as the whole right-hand side of <code>set</code> (annotations work: <code>set x: text to match ...:</code>), after <code>give back</code>, and after <code>say</code>:</p>
+<pre><code>to label with v:
+    give back match v:
+        when [a]:
+            "single " + text(a)
+        when x:
+            "other"</code></pre>
+<p>The full pattern language (Alpha 6 + Alpha 11 — literals, <code>ok</code>/<code>error</code>, bare bindings, comma alternatives, guards, <code>[...]</code>/<code>{...}</code> nesting) works unchanged in expression position.</p>
+<h2>Arm values</h2>
+<p>Each arm body is a statement list; the arm's <strong>value</strong> is the value of its <strong>last statement</strong>, which must be an expression:</p>
+<pre><code>set v to match [1, 2, 3]:
+    when [first, ...rest]:
+        say "saw rest"      # statements are fine...
+        text(first) + "/" + text(length(rest))   # ...but the arm must end with an expression
+    otherwise:
+        "empty"</code></pre>
+<p>An arm ending in <code>say</code> (a statement, not an expression) is a checker error: <code>match arm must end with an expression to produce a value</code>.</p>
+<h2>Typing and exhaustiveness</h2>
+<ul>
+<li>Every arm's final expression is typed; all arms must agree, or the</li>
+</ul>
+<p>checker reports <code>match arms produce different types: number vs text</code>. The match expression's type is that common type.</p>
+<ul>
+<li>A match <strong>expression</strong> must be exhaustive — it needs an <code>otherwise:</code> arm,</li>
+</ul>
+<p>or its last <code>when</code> must be an unguarded catch-all (<code>when x:</code>). Otherwise the checker reports <code>match expression must be exhaustive — add an otherwise: arm</code> with line/column. Match <strong>statements</strong> keep their lenient behavior (no match → execution simply continues).</p>
+<h2>Semantics notes</h2>
+<ul>
+<li>Evaluation order is identical to match statements: subject (once) →</li>
+</ul>
+<p>pattern test → bindings → guard → body; first match wins; a failed guard falls through. The winning arm's final expression value becomes the match's value.</p>
+<ul>
+<li>Match expressions nest freely in arm bodies (each has its own subject</li>
+</ul>
+<p>and result slots, so nesting is safe).</p>
+<h2>Backends</h2>
+<p>All three backends (VM, WASM, native) implement the same semantics; <code>tests/test_match_expr.py</code> checks 6 programs byte-identical across VM, WASM, and native, and <code>tests/niko2_cases/match_expr.niko</code> covers values from guards, list/record patterns, nested matches, and all three expression positions on the VM.</p>
+<h2>Limits</h2>
+<ul>
+<li>A match expression must be the whole right-hand side (`set x to match</li>
+</ul>
+<p>...:`) — it can't appear inside a larger expression, a guard, or as a call argument yet.</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

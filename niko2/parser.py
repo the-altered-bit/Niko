@@ -336,11 +336,17 @@ def parse_match_value(lines,i,ind,value_str,line_no):
 
 def parse_if(lines,i,ind):
     branches=[]; otherwise=None; j=i
+    # The opening `if` is consumed up front. Only `otherwise if` /
+    # `otherwise:` at the SAME indent continue the statement -- a later bare
+    # `if` always starts a new statement (Alpha 28: the loop used to match
+    # any `if ` line, so sequential `if`s at the same level were silently
+    # parsed as one if/elif chain and the second body never ran).
+    text=lines[j].strip(); ln=j+1
+    require_colon(lines[j],ln); body,k=child_block(lines,j+1,ind); branches.append((parse_expr(text[3:-1].strip(),ln),body)); j=k
     while j<len(lines):
+        if indent_of(lines[j])!=ind: break
         text=lines[j].strip(); ln=j+1
-        if text.startswith('if '):
-            require_colon(lines[j],ln); body,k=child_block(lines,j+1,ind); branches.append((parse_expr(text[3:-1].strip(),ln),body)); j=k
-        elif text.startswith('otherwise if '):
+        if text.startswith('otherwise if '):
             require_colon(lines[j],ln); body,k=child_block(lines,j+1,ind); branches.append((parse_expr(text[13:-1].strip(),ln),body)); j=k
         elif text=='otherwise:':
             body,k=child_block(lines,j+1,ind); otherwise=body; j=k; break

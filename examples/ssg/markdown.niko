@@ -1,0 +1,253 @@
+# markdown.niko — a pragmatic Markdown-subset to HTML converter, written in Niko.
+#
+# Supported subset (documented in README.md):
+#   headings (#, ##, ###), paragraphs, fenced code blocks (```),
+#   inline code (`code`), bold (**), italic (*), links [text](url),
+#   unordered lists (- ), horizontal rules (---).
+# Everything else (tables, blockquotes, ordered lists, images, ...) is
+# passed through as plain paragraphs with HTML-escaped text.
+
+# --- small string helpers ------------------------------------------------
+
+to escape_html with s:
+    # Escape & first so we don't double-escape the entities we add.
+    set out to replace(s, "&", "&amp;")
+    set out to replace(out, "<", "&lt;")
+    set out to replace(out, ">", "&gt;")
+    give back out
+
+to escape_attr with s:
+    give back replace(escape_html(s), "\"", "&quot;")
+
+to drop_chars with s, n:
+    # The text of s with the first n characters removed.
+    if n >= length of s:
+        give back ""
+    set out to ""
+    for each i in numbers (n + 1) to length of s:
+        set out to out + item i of s
+    give back out
+
+to slice_between with s, a, b:
+    # Characters a..b of s, 1-indexed and inclusive on both ends.
+    if a > b:
+        give back ""
+    set out to ""
+    for each i in numbers a to b:
+        set out to out + item i of s
+    give back out
+
+to find_from with s, sub, start:
+    # 1-indexed position of sub at or after start, or 0 when absent.
+    set n to length of s
+    set m to length of sub
+    set i to start
+    while i <= n - m + 1:
+        if starts_with(drop_chars(s, i - 1), sub):
+            give back i
+        add 1 to i
+    give back 0
+
+to find_italic_close with s, start:
+    # Position of a lone "*" at or after start (skips "**" pairs), else 0.
+    # Note: Niko 2's `and` does not short-circuit, so the bounds check is a
+    # nested `if`, not `i < n and ...`.
+    set n to length of s
+    set i to start
+    while i <= n:
+        if item i of s is "*":
+            set is_pair to no
+            if i < n:
+                if item (i + 1) of s is "*":
+                    set is_pair to yes
+            if is_pair:
+                set i to i + 2
+            otherwise:
+                give back i
+        otherwise:
+            add 1 to i
+    give back 0
+
+# --- inline rendering ----------------------------------------------------
+
+to render_inline with text:
+    set out to ""
+    set n to length of text
+    set i to 1
+    while i <= n:
+        set ch to item i of text
+        if ch is "`":
+            set close to find_from(text, "`", i + 1)
+            if close is 0:
+                set out to out + escape_html(ch)
+                add 1 to i
+            otherwise:
+                set code to slice_between(text, i + 1, close - 1)
+                set out to out + "<code>" + escape_html(code) + "</code>"
+                set i to close + 1
+        otherwise if ch is "*":
+            # Niko 2's `and` does not short-circuit: check the bound first.
+            set is_bold to no
+            if i < n:
+                if item (i + 1) of text is "*":
+                    set is_bold to yes
+            if is_bold:
+                set close to find_from(text, "**", i + 2)
+                if close is 0:
+                    set out to out + escape_html("**")
+                    set i to i + 2
+                otherwise:
+                    set inner to slice_between(text, i + 2, close - 1)
+                    set out to out + "<strong>" + render_inline(inner) + "</strong>"
+                    set i to close + 2
+            otherwise:
+                set close to find_italic_close(text, i + 1)
+                if close is 0:
+                    set out to out + escape_html(ch)
+                    add 1 to i
+                otherwise:
+                    set inner to slice_between(text, i + 1, close - 1)
+                    set out to out + "<em>" + render_inline(inner) + "</em>"
+                    set i to close + 1
+        otherwise if ch is "[":
+            set link to try_link(text, i, n)
+            if link["html"] is "":
+                set out to out + escape_html(ch)
+                add 1 to i
+            otherwise:
+                set out to out + link["html"]
+                set i to link["end"] + 1
+        otherwise:
+            set out to out + escape_html(ch)
+            add 1 to i
+    give back out
+
+to try_link with text, i, n:
+    # "[label](url)" starting at i -> {"html": ..., "end": ...},
+    # or {"html": "", "end": 0} when the text at i is not a link.
+    set close_b to find_from(text, "]", i + 1)
+    if close_b is 0:
+        give back {"html": "", "end": 0}
+    set after to close_b + 1
+    # Niko 2's `or` does not short-circuit: the bounds check must come first.
+    set opens_paren to no
+    if after <= n:
+        if item after of text is "(":
+            set opens_paren to yes
+    if opens_paren is no:
+        give back {"html": "", "end": 0}
+    set close_p to find_from(text, ")", close_b + 2)
+    if close_p is 0:
+        give back {"html": "", "end": 0}
+    set label to slice_between(text, i + 1, close_b - 1)
+    set url to slice_between(text, close_b + 2, close_p - 1)
+    set html to "<a href=\"" + escape_attr(url) + "\">" + render_inline(label) + "</a>"
+    give back {"html": html, "end": close_p}
+
+# --- block rendering -----------------------------------------------------
+
+to flush_para with para:
+    if length of para is 0:
+        give back ""
+    give back "<p>" + render_inline(join(para, " ")) + "</p>\n"
+
+to flush_list with in_list:
+    if in_list:
+        give back "</ul>\n"
+    give back ""
+
+to open_code with lang, buf:
+    set attr to ""
+    if lang is not "":
+        set attr to " class=\"language-" + escape_attr(lang) + "\""
+    give back "<pre><code" + attr + ">" + escape_html(join(buf, "\n")) + "</code></pre>\n"
+
+to markdown_to_html with md:
+    set lines to split(md, "\n")
+    set html to ""
+    set para to []
+    set in_list to no
+    set in_code to no
+    set code_lang to ""
+    set code_buf to []
+    for each ln in lines:
+        if in_code:
+            if starts_with(trim(ln), "```"):
+                set html to html + open_code(code_lang, code_buf)
+                set in_code to no
+                set code_lang to ""
+                set code_buf to []
+            otherwise:
+                put ln in code_buf
+            skip
+        set t to trim(ln)
+        if starts_with(t, "```"):
+            set html to html + flush_para(para) + flush_list(in_list)
+            set para to []
+            set in_list to no
+            set in_code to yes
+            set code_lang to trim(drop_chars(t, 3))
+            skip
+        if t is "":
+            set html to html + flush_para(para) + flush_list(in_list)
+            set para to []
+            set in_list to no
+            skip
+        if t is "---":
+            set html to html + flush_para(para) + flush_list(in_list)
+            set para to []
+            set in_list to no
+            set html to html + "<hr>\n"
+            skip
+        if starts_with(t, "### "):
+            set html to html + flush_para(para) + flush_list(in_list)
+            set para to []
+            set in_list to no
+            set html to html + "<h3>" + render_inline(trim(drop_chars(t, 4))) + "</h3>\n"
+            skip
+        if starts_with(t, "## "):
+            set html to html + flush_para(para) + flush_list(in_list)
+            set para to []
+            set in_list to no
+            set html to html + "<h2>" + render_inline(trim(drop_chars(t, 3))) + "</h2>\n"
+            skip
+        if starts_with(t, "# "):
+            set html to html + flush_para(para) + flush_list(in_list)
+            set para to []
+            set in_list to no
+            set html to html + "<h1>" + render_inline(trim(drop_chars(t, 2))) + "</h1>\n"
+            skip
+        if starts_with(t, "- "):
+            set html to html + flush_para(para)
+            set para to []
+            if in_list is no:
+                set html to html + "<ul>\n"
+                set in_list to yes
+            set item_text to trim(drop_chars(t, 2))
+            set html to html + "<li>" + render_inline(item_text) + "</li>\n"
+            skip
+        # A plain line: close any open list, then join the paragraph.
+        set html to html + flush_list(in_list)
+        set in_list to no
+        put t in para
+    set html to html + flush_para(para) + flush_list(in_list)
+    if in_code:
+        set html to html + open_code(code_lang, code_buf)
+    give back html
+
+# --- page helpers --------------------------------------------------------
+
+to page_title with md:
+    # The first "# " heading, or "Untitled" when the doc has none.
+    for each ln in split(md, "\n"):
+        set t to trim(ln)
+        if starts_with(t, "# "):
+            give back trim(drop_chars(t, 2))
+    give back "Untitled"
+
+to plain_title with s:
+    # A heading with its inline markers stripped, for <title> and nav text.
+    set out to replace(s, "**", "")
+    set out to replace(out, "`", "")
+    set out to replace(out, "*", "")
+    give back out

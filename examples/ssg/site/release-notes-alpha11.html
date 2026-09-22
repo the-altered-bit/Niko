@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 11 release notes — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 11 release notes</h1>
+<p><strong>Match guards + list/record patterns.</strong> The <code>match</code> statement (Alpha 6) grows up: arms can now carry a boolean guard, and patterns can take apart lists and records — on all three backends, byte-identical.</p>
+<h2>New syntax</h2>
+<pre><code>match order:
+    when [item, ...rest] if item is "cake":
+        say "cake plus " + text(length(rest)) + " more"
+    when [a, b]:
+        say text(a + b)
+    when {name: n, age: a} if a is at least 18:
+        say n + " is an adult"
+    when {name: n}:
+        say n + " is a minor"
+    otherwise:
+        say "no match"</code></pre>
+<p><strong>Guards</strong> — <code>when &lt;patterns&gt; if &lt;expr&gt;:</code>: the arm runs only if the pattern matches <em>and</em> the guard is true. The guard is checked after the bindings, so it can use them (<code>when [a] if a is bigger than 10:</code>). A failed guard falls through to the next pattern/arm, exactly like a failed match. Guards must be boolean, like <code>if</code>/<code>while</code> conditions.</p>
+<p><strong>List patterns</strong> — <code>[a, b]</code> matches a list of exactly two items; <code>[]</code> matches only the empty list; <code>[first, ...rest]</code> binds the head and the remaining items (possibly empty); <code>[...all]</code> binds the whole list. <code>...rest</code> must come last, and there can be only one. A list pattern against a non-list simply doesn't match.</p>
+<p><strong>Record patterns</strong> — <code>{name: n, age: a}</code> matches a record having (at least) those keys and binds each through its sub-pattern. Extra keys are fine; a missing key (or a non-record subject) means no match.</p>
+<p>Patterns nest freely: <code>when [[a], {x: b}]:</code>, <code>when [ok v]:</code>, <code>when {scores: [top, ...rest]}:</code>.</p>
+<h2>Semantics notes</h2>
+<ul>
+<li>Evaluation order per arm: subject (once) → pattern test → bindings →</li>
+</ul>
+<p>guard → body. First match wins.</p>
+<ul>
+<li>Capture is by position for lists (Niko's 1-based indexing doesn't apply</li>
+</ul>
+<p>inside patterns — <code>[a, b]</code> is just "two items").</p>
+<ul>
+<li>The typechecker types list element bindings from <code>list&lt;T&gt;</code> (<code>list&lt;number&gt;</code></li>
+</ul>
+<p>gives <code>number</code> elements; <code>...rest</code> gives <code>list&lt;number&gt;</code>), and statically rejects a list pattern against a known non-list (and record patterns against known non-records) with a clear error. Record fields type as <code>any</code>.</p>
+<ul>
+<li><code>ok</code>/<code>error</code> patterns still take a bare name (<code>when ok [a]:</code> is a parse</li>
+</ul>
+<p>error — use <code>when ok v:</code> then match on <code>v</code>).</p>
+<ul>
+<li>Malformed patterns get line/column errors: <code>...rest</code> not last, two rests,</li>
+</ul>
+<p>bad rest names, record fields without <code>key: pattern</code>, <code>if</code> with no condition.</p>
+<h2>Backends</h2>
+<p>All three backends (VM, WASM, native) implement the same semantics; <code>tests/test_match_patterns.py</code> runs a 3-way differential (byte-identical stdout, skipping cleanly without node/cc). Implementation notes:</p>
+<ul>
+<li>VM: three new tiny opcodes (<code>IS_LIST</code>, <code>IS_RECORD</code>, <code>LIST_SLICE</code>); nested</li>
+</ul>
+<p>subject values live in hidden <code>$patN</code> slots (not valid identifiers, so they can't be captured); pattern bindings are plain <code>STORE</code>s, so closures work over them unchanged.</p>
+<ul>
+<li>WASM: tag + length/item host helpers; guard as a nested <code>if_</code>.</li>
+<li>Native: <code>_gen_match</code> restructured from an <code>if/else if</code> chain to</li>
+</ul>
+<p>per-pattern <code>if (test) { binds; if (guard) { body; goto end; } }</code>; new <code>nval_list_slice</code> / <code>nval_record_has</code> runtime helpers.</p>
+<h2>Tests &amp; docs</h2>
+<ul>
+<li><code>tests/niko2_cases/match_patterns.niko</code> (+<code>.out</code>): 20-line VM-suite</li>
+</ul>
+<p>coverage (guards, fallthrough, nesting, rest edges, records).</p>
+<ul>
+<li><code>tests/test_match_patterns.py</code>: 15 checker rejections + 8 legal programs</li>
+</ul>
+<p>(with message fragments asserted) and the 3-way differential.</p>
+<ul>
+<li>Formatter, LSP symbols (hover/go-to-definition on the new bindings), and</li>
+</ul>
+<p>closure analysis all understand the new nodes.</p>
+<ul>
+<li>Full suite green: 26 niko1 cases, 14 niko2 cases + nikoir round trip,</li>
+</ul>
+<p>every <code>tests/test_*.py</code>.</p>
+<h2>Still future work</h2>
+<p><code>match</code> as an expression (statement-only for now).</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

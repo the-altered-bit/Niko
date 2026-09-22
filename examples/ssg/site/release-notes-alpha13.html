@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 13 release notes (2026-09-21) — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 13 release notes (2026-09-21)</h1>
+<p><strong>Modules.</strong> Multi-file Niko 2 programs: split code across <code>.niko</code> files and pull them in with <code>import</code>. One module system, qualified access, identical on all three backends, byte-identical.</p>
+<h2>New syntax</h2>
+<pre><code>import "lib/mathutil.niko" as m
+
+say m.add(2, 3)
+say m.factor</code></pre>
+<p><code>mathutil.niko</code>:</p>
+<pre><code>to add with x, y:
+    give back x + y
+set factor to 10</code></pre>
+<ul>
+<li><code>import</code> must be at the top level of a file (not inside a <code>to</code> or a</li>
+</ul>
+<p>block); elsewhere the checker rejects it with <code>import must be at the top of the file</code>.</p>
+<ul>
+<li>The path must end in <code>.niko</code> and must be quoted;</li>
+</ul>
+<p><code>import "notes.txt" as n</code> is a compile error: <code>import expects a .niko file, got "notes.txt"</code>. An <code>as alias</code> after the path is required (<code>expected as ALIAS after the import path</code>).</p>
+<ul>
+<li>Paths resolve relative to the importing file's directory first, then</li>
+</ul>
+<p>the current working directory. A missing file reports <code>cannot find module "…"</code> with the caret on the import line.</p>
+<h2>Qualified access and exports</h2>
+<p>The alias binds to a <strong>record of the module's exports</strong> — call functions as <code>m.add(2, 3)</code> and read values as <code>m.factor</code>. Exports are the names bound by top-level <code>set</code> and <code>to</code> in the module; everything else stays private. The legacy <code>use "…"</code> statement (Niko 1 compatibility, unqualified merge) is unchanged in the entry file, but rejected inside imported modules: <code>'use' is not supported inside imported modules -- use 'import "…" as …' instead</code>.</p>
+<h2>Import cache</h2>
+<p>A module's top-level code runs <strong>exactly once</strong> per program, no matter how many importers it has or how many aliases import it. A module that says something at the top level says it once; transitive imports share the same loaded module. Each importer's alias points at the same record, so module state is shared, not copied.</p>
+<h2>Cycles</h2>
+<p>An import cycle is a compile error that names the loop and points at the <code>import</code> line that closes it:</p>
+<pre><code>import cycle: cyc1.niko -&gt; cyc2.niko -&gt; cyc1.niko</code></pre>
+<h2>Errors</h2>
+<p>Parse/type errors inside a module are reported <strong>against the module file</strong>, with line/column carets on that file's source — importing a broken module points at the module's own bad line, not at the import line. Module diagnostics render on all three backends.</p>
+<h2>Backends</h2>
+<p>All three backends (VM, WASM, native) get modules for free: <code>import</code> desugars to a single <code>Program</code> before any backend compiles it (see <code>ALPHA13_DESIGN.md</code>). <code>tests/test_modules.py</code> runs 7 multi-file programs 3-way differential (byte-identical across VM, WASM, native) and asserts 7 error cases on every available backend.</p>
+<h2>Limits</h2>
+<ul>
+<li>Single-file tools don't follow imports: <code>niko2 lsp</code> and <code>niko2 check</code></li>
+</ul>
+<p>analyze one file at a time, so go-to-definition/hover don't cross the import boundary.</p>
+<ul>
+<li>No search path yet: paths resolve relative to the importing file, then</li>
+</ul>
+<p>cwd only — no stdlib search path or package manager.</p>
+<ul>
+<li><code>import</code> must be at the top of the file, not inside functions or blocks.</li>
+</ul>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

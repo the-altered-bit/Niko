@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 20 release notes (2026-09-22) — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 20 release notes (2026-09-22)</h1>
+<p><strong>Niko 2 gets an interactive REPL.</strong> <code>niko2 repl</code> drops you into a live session on the VM: type Niko 2 code line by line, define functions across multiple lines, import modules, and see values echoed back — with the same caret diagnostics as scripts and no way to kill the session with a bad chunk.</p>
+<pre><code class="language-console">$ python -m niko2 repl
+Niko 2 REPL (VM). Type :help for help; :quit or Ctrl-D to leave.
+niko&gt; set x to 5
+niko&gt; say x + 1
+6
+niko&gt; to add with a, b:
+....     give back a + b
+....
+niko&gt; say add(2, 3)
+5
+niko&gt; 1 + 2
+3
+niko&gt; import "stdlib/text.niko" as text
+niko&gt; say text.capitalize("hi")
+Hi
+niko&gt; :quit</code></pre>
+<h2>How it works</h2>
+<ul>
+<li><strong>Prompts:</strong> <code>niko&gt; </code> for a fresh submission, <code>.... </code> while a block is</li>
+</ul>
+<p>open. A line ending in <code>:</code> opens a block (a colon inside a string doesn't count); finish with a blank line or a dedented line. <code>otherwise:</code> / <code>when </code> arms keep a match/if open across dedents.</p>
+<ul>
+<li><strong>Echo:</strong> a bare expression (<code>1 + 2</code>) is evaluated and its value</li>
+</ul>
+<p>printed; <code>nothing</code> is never echoed. Statements behave as in scripts.</p>
+<ul>
+<li><strong>Persistence:</strong> every accepted chunk stays in the session — <code>set x</code></li>
+</ul>
+<p>on line 1 is visible to line 50. Each chunk is parsed and typechecked against the <em>whole</em> accumulated history, and only the new statements are compiled and run. One VM and one globals dict live for the whole session.</p>
+<ul>
+<li><strong>Imports:</strong> <code>import "path/to/file.niko" as alias</code> goes through the</li>
+</ul>
+<p>normal module pipeline; relative paths resolve against the directory where you started the REPL. A module's top-level code runs exactly once per session, even if you import it again.</p>
+<ul>
+<li><strong>Commands:</strong> <code>:help</code>, <code>:quit</code> / <code>:exit</code>, <code>:reset</code> (forgets everything).</li>
+</ul>
+<p>Unknown <code>:foo</code> gets a plain-English hint. Ctrl-D leaves; Ctrl-C discards the current block and re-prompts; errors print the usual caret diagnostics and never kill the session.</p>
+<ul>
+<li><strong>Diagnostics</strong> show cumulative session line numbers, so a caret</li>
+</ul>
+<p>always points at the line you actually typed.</p>
+<p><strong>Deliberate limits:</strong> VM backend only (WASM/native are compile targets, not REPL targets); no single-chunk undo (<code>:reset</code> clears everything); spaces expected for indentation. See <code>ALPHA20_DESIGN.md</code> and <code>niko2/KNOWN_LIMITATIONS.md</code>.</p>
+<p>Full suite green: 26 Niko 1 cases, 15 Niko 2 cases + nikoir round trip, all <code>tests/test_*.py</code> (new: <code>tests/test_repl.py</code>, 20 checks — scripted stdin driving real <code>niko2 repl</code> subprocesses, hermetic throwaway cwd).</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

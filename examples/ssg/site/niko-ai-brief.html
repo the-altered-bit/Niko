@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko: briefing for an AI (learning it, teaching it, or developing it) — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko: briefing for an AI (learning it, teaching it, or developing it)</h1>
+<p>Paste this whole file at the start of a conversation. If you can, also attach <code>niko.py</code> (the reference implementation, about 500 lines). Then say what you want, for example: "Teach me Niko with 5 small exercises" or "Add a <code>sort</code> helper to both engines and add a test".</p>
+<hr>
+<h2>1. What Niko is</h2>
+<p>Niko is a general-purpose, beginner-friendly programming language whose programs read like English instructions. Files end in <code>.niko</code>. It is dynamically typed, uses indentation for blocks (like Python), and has automatic memory management because it runs on top of a host language.</p>
+<p>There are two engines that must always behave the same:</p>
+<p>| Engine | File | Translates Niko to | Where it runs | |---|---|---|---| | Desktop | <code>niko.py</code> | Python | Any computer with Python 3.8+ (also has a REPL and <code>use</code>) | | Browser IDE | <code>ide/niko-ide.html</code> | JavaScript | Any browser, including phones (editor, Run, REPL tab) |</p>
+<p>Design goals: readable minimal syntax; consistent rules; clear error messages (what and where); dynamic typing; automatic memory management; interactive REPL; rich standard library; strong docs and community; gentle learning curve (something useful in the first few lines).</p>
+<h2>2. How to behave (instructions to the AI)</h2>
+<ul>
+<li>When <strong>teaching</strong>: use only the features in this file, keep examples short, explain errors in plain</li>
+</ul>
+<p>words, give one small exercise at a time. Never invent syntax. If unsure a feature exists, say so.</p>
+<ul>
+<li>When <strong>writing Niko</strong>: 4-space indentation, one instruction per line, descriptive <code>lower_case</code> names,</li>
+</ul>
+<p><code>text(x)</code> when joining a number to text, positions start at 1.</p>
+<ul>
+<li>When <strong>developing the language</strong>: change both engines, keep line numbers stable, add a test case</li>
+</ul>
+<p>in <code>tests/cases/</code>, run <code>python tests/run_tests.py --ide</code>, and update the guide's A to Z reference. Follow section 7.</p>
+<h2>3. The language in one page</h2>
+<p>Program shape: lines of text. A line ending in <code>:</code> opens a block; the block is the following lines indented deeper. Comments start with <code>#</code>. Text uses <code>"double"</code> or <code>'single'</code> quotes. Names are letters, digits and underscores. Everything is case-sensitive; keywords are lowercase.</p>
+<pre><code># statements
+set NAME to VALUE                    create or change a variable
+set item N of LIST to VALUE          change a list position (N starts at 1)
+set RECORD["key"] to VALUE           change or add a record label
+add VALUE to NAME                    NAME += VALUE
+take VALUE from NAME                 NAME -= VALUE
+put VALUE in LIST                    append
+remove VALUE from LIST               remove the first match (no error if missing)
+say A, B, C                          print values separated by spaces (no arguments prints an empty line)
+ask TEXT into NAME                   read text
+ask number TEXT into NAME            read a number, asking again until valid
+if COND:  /  otherwise if COND:  /  otherwise:
+repeat N times:      repeat forever:
+for each NAME in LIST_OR_TEXT:       while COND:
+stop                                 leave the loop
+skip                                 next round
+to NAME with A, B:   /   to NAME:    define a function (call it as NAME(x, y) or NAME())
+give back VALUE                      return
+assert EXPR  /  assert EXPR, "message"   fail with a Niko error naming the expression and line (message optional, text)
+match VALUE:  /  when PATTERN:  /  otherwise:     (Niko 2 only) pick a branch by shape — see 3b
+use MODULE                           import a Python library (desktop only)
+ANYTHING ELSE                        an expression, e.g. a function call: greet("Sam")</code></pre>
+<p>Expressions:</p>
+<pre><code>math          + - * / % **  and parentheses         (no // ; use floor(a / b))
+comparison    is   is not   is bigger than   is smaller than   is at least   is at most   is in
+logic         and   or   not          values: yes  no  nothing
+lists         [1, 2, 3]      item N of X      length of X      numbers A to B (inclusive, counts down if A &gt; B)
+records       {"name": "Niko", "age": 2}      record["name"]
+random        random A to B (whole number, inclusive)</code></pre>
+<p><code>X</code> after <code>item N of</code>, <code>length of</code>, and <code>is in</code> is a name, optionally followed by one call or one index: <code>length of read_file("a.txt")</code>, <code>item 2 of pet["tags"]</code>. Anything more complex: store it in a variable first.</p>
+<p>Text: join with <code>+</code>. To join a number use <code>text(n)</code> (the desktop engine refuses <code>"a" + 5</code>).</p>
+<p>Scope: a function can read and change variables created at the top level (by <code>set</code>, <code>ask ... into</code>, or <code>for each</code>). A variable first created inside a function is local to it. Parameters are local.</p>
+<p>Output formatting: <code>yes</code>/<code>no</code>/<code>nothing</code>; whole floats print without <code>.0</code> (<code>10 / 2</code> prints <code>5</code>); lists print like <code>[1, "two", yes]</code> (strings quoted inside lists); records print like <code>{name: "Niko"}</code>.</p>
+<h2>4. Standard library (built in, no import)</h2>
+<p>| Group | Helpers | |---|---| | Numbers | <code>abs(x)</code> <code>ceil(x)</code> <code>floor(x)</code> <code>round(x, digits)</code> <code>sqrt(x)</code> <code>max(...)</code> <code>min(...)</code> <code>pi</code> <code>random A to B</code> | | Text | <code>upper(t)</code> <code>lower(t)</code> <code>trim(t)</code> <code>replace(t, a, b)</code> <code>starts_with(t, p)</code> <code>ends_with(t, p)</code> <code>split(t, sep)</code> <code>join(list, sep)</code> <code>count_of(t, part)</code> <code>text(x)</code> <code>number(t)</code> | | Lists | <code>sorted(l)</code> <code>reversed(l)</code> <code>unique(l)</code> <code>sum(l)</code> <code>average(l)</code> <code>max(l)</code> <code>min(l)</code> <code>pick(l)</code> <code>count_of(l, x)</code> <code>has(c, x)</code> (same as <code>x is in c</code>) | | Records | <code>keys(record)</code> | | Files | <code>write_file(name, text)</code> <code>append_file(name, text)</code> <code>read_file(name)</code> <code>read_lines(name)</code> <code>file_exists(name)</code> | | Time | <code>today()</code> <code>now()</code> <code>sleep(seconds)</code> | | Results (Niko 2 only) | <code>ok(v)</code> <code>error(msg)</code> <code>is_ok(r)</code> <code>is_error(r)</code> <code>unwrap(r)</code> <code>unwrap_or(r, default)</code> <code>error_message(r)</code> <code>try_read_file(name)</code> <code>try_number(text)</code> |</p>
+<h3>3b. <code>match</code> and results (Niko 2 only)</h3>
+<p>Some things can fail — reading a file that isn't there, turning text into a number. Instead of crashing, Niko 2 can hand you a <strong>result</strong>: <code>ok(value)</code> when it worked, <code>error(message)</code> when it didn't. <code>try_read_file(name)</code> and <code>try_number(text)</code> return results; the plain <code>read_file</code> / <code>number</code> still raise the friendly error as before.</p>
+<pre><code>match try_number(ask "age?"):
+    when ok n:
+        say "you are " + text(n)
+    when error msg:
+        say "that wasn't a number"</code></pre>
+<p>Patterns, tried top to bottom, first match wins: a literal (<code>1</code>, <code>"quit"</code>, <code>yes</code>, <code>nothing</code>), <code>ok name</code> / <code>error name</code> (the name holds the value / the message), a bare name (<code>when d:</code> catches anything and names it), or several patterns with commas (<code>when "sat", "sun":</code>). Patterns can also take lists apart — <code>when [a, b]:</code> (exactly two items), <code>when []:</code> (empty only), <code>when [first, ...rest]:</code> (head and tail) — and records — <code>when {name: n, age: a}:</code> (needs those keys; extra keys are fine) — nested as deeply as you like (<code>when [[a], {x: b}]:</code>). An arm can carry a guard: <code>when [a] if a is bigger than 10:</code> runs only when the pattern matches <em>and</em> the guard is true (the guard can use the pattern's names); a failed guard just tries the next arm. <code>otherwise:</code> is the optional fallback; with no match and no <code>otherwise</code>, the program just carries on. An <strong>option</strong> (<code>option&lt;T&gt;</code>) is even simpler: a value or <code>nothing</code> — <code>unwrap_or(maybe_name, 0)</code> gives the value or <code>0</code>.</p>
+<p><code>match</code> also works as an expression — the winning arm's last line is the value:</p>
+<pre><code>set grade to match score:
+    when n if n is at least 90:
+        "honors"
+    when n if n is at least 50:
+        "pass"
+    otherwise:
+        "fail"</code></pre>
+<p>Each arm must end with an expression (not <code>say</code>), all arms must produce the same kind of value, and the match must be exhaustive — it needs <code>otherwise:</code> or a catch-all <code>when x:</code> as the last arm. Also usable after <code>give back</code> and <code>say</code>.</p>
+<h3>3c. Modules (Niko 2 only)</h3>
+<p>Big programs can split across files. <code>import "lib/util.niko" as u</code> (top of the file only; the path must end in <code>.niko</code> and be quoted; <code>as alias</code> is required) binds <code>u</code> to a record of the file's exports — the names set with top-level <code>set</code> and <code>to</code>. Access is qualified:</p>
+<pre><code>import "lib/util.niko" as u
+say u.shout("hello")</code></pre>
+<p>A file's top-level code runs exactly once per program, no matter how many files import it (import cache), and transitive imports just work. Importing a file in a circle (<code>a</code> imports <code>b</code> imports <code>a</code>) is a compile error. Errors inside an imported file are reported against that file. <code>use</code> (the older single-file include) can't appear inside imported modules. <code>use "lib/util.niko"</code> (also top of the file only) is the unqualified sibling of <code>import</code>: it merges the used file's top-level <code>set</code>/<code>to</code> names straight into your scope, no alias. Used files run before the entry body, each exactly once per program (diamond-safe, transitive); on name conflicts the later <code>use</code> wins, and your own <code>set</code>s/<code>to</code>s always win over used names. A <code>use</code> cycle is a compile error (<code>use cycle: a.niko -&gt; b.niko -&gt; a.niko</code>); <code>import</code> can't appear inside a used file. <code>use</code> works identically on all three backends. Paths resolve in order: the importing file's folder, each <code>NIKO_PATH</code> folder, the bundled standard library (paths starting with <code>stdlib/</code>), then the current folder. The standard library is four pure-Niko modules — <code>import "stdlib/text.niko" as text</code> (text helpers), <code>import "stdlib/math.niko" as math</code>, <code>import "stdlib/lists.niko" as lists</code>, <code>import "stdlib/records.niko" as records</code> — see <code>STDLIB.md</code> for the full reference. A <code>stdlib/</code> folder next to your file or on <code>NIKO_PATH</code> shadows the bundled one. Importing works identically on all three backends.</p>
+<p>In the browser IDE, files live in <code>localStorage</code> (virtual); on the desktop they are real files.</p>
+<h3>3d. Packages (Niko 2 only)</h3>
+<p>Reusable libraries are packages: a folder (or git repo) with a <code>niko.toml</code> manifest (<code>[package]</code> with <code>name</code>, <code>version</code>, optional <code>entry</code> and <code>description</code>). Install one with <code>niko2 get &lt;folder-or-git-url&gt;</code> — the only command that ever uses the network — then import it:</p>
+<pre><code>import "pkg:hello-pkg/greet.niko" as greet
+say greet.greet("Casper")</code></pre>
+<p>The import string takes no version; versions live in <code>niko.lock</code> (<code>niko2 lock</code> pins them and never silently upgrades). Resolution is: lockfile pin → newest cached version in <code>~/.niko/packages</code> (override with <code>NIKO_PKG_CACHE</code>) → a friendly <code>unknown package</code> error telling you to run <code>niko2 get</code> first. Everything else resolves packages offline.</p>
+<p>Packages can also come from a <strong>registry</strong>: <code>niko2 publish [--registry &lt;dir&gt;]</code> publishes the current package (local-directory registries only — no auth yet; a registry is just static files, <code>index.json</code> + <code>tarballs/</code>, so publish locally and sync the dir to any static host), and <code>niko2 get &lt;name&gt;</code> / <code>niko2 get &lt;name&gt;@&lt;range&gt;</code> installs the newest version satisfying the range (<code>*</code>, <code>1.2.3</code>, <code>1.2</code>, npm-style <code>^1.2.3</code>/<code>~1.2.3</code>, comparators, comma AND), writing the pin <code>{version, source, range}</code> to <code>niko.lock</code>. <code>niko2 get --update &lt;name&gt;</code> upgrades to the newest matching version and re-pins the updated package's dependency subtree. The registry is selected by <code>NIKO_REGISTRY</code> (<code>http(s)://</code> index URL, <code>file://</code> URL, or local dir) or <code>~/.niko/config.toml</code> <code>[registry] url</code>; HTTP fetches use a 10s timeout with plain-English errors (HTTP status / DNS / refused / timeout), and downloads are sha256-verified before the cache is touched. Packages declare <code>[dependencies]</code> (name → range) in <code>niko.toml</code>; <code>get</code> installs the transitive closure from the same registry, and <code>niko2 lock</code> pins the whole closure (<code>{version, source, range}</code> per package, <code>range</code> = the parent's requested range; re-locking never silently upgrades, and conflicting live requirements are a hard error). After every registry <code>get</code>, the CLI backfills any lockfile-pinned versions missing from the cache, exactly (<code>✓ installed locked dependencies: …</code>), so a fresh machine reproduces the author's tree. One caveat: a <code>pkg:</code> import <em>inside</em> an installed package resolves to the newest <em>cached</em> version, not the pin (direct project imports always honor the pin). <code>examples/packages/</code> holds a worked package-manager example; <code>examples/registry-http/</code> walks through publish → serve over HTTP → get → lock → run.</p>
+<h2>5. Error messages (part of the language design)</h2>
+<p>Format: <code>Oops on line N: MESSAGE</code>. Messages are plain English. Examples: <code>I don't know what "totl" is. Did you mean "total"?</code> (edit distance &lt;= 2 against your names and helper names); <code>That position isn't in the list (positions start at 1).</code>; <code>I couldn't find the file "x".</code>; <code>I can't turn "abc" into a number.</code>; <code>"otherwise" needs an "if" right above it</code>; <code>You mixed text and numbers. Use text(...) to turn a number into text.</code> (desktop).</p>
+<h2>6. Known differences between the engines (candidates to fix)</h2>
+<p>1. Division by zero: desktop raises an error, browser gives infinity. 2. <code>"a" + 5</code>: desktop error, browser silently gives <code>"a5"</code>. Recommend <code>text()</code> always. 3. Truthiness of empty lists and text as conditions differs (Python vs JavaScript). Compare explicitly. 4. Very large integers: Python is exact, JavaScript uses doubles (<code>factorial(25)</code> differs). 5. Record keys that look like integers keep insertion order on desktop but are sorted in the browser. 6. <code>use</code> exists only on the desktop.</p>
+<h2>7. How the engines work (for developers)</h2>
+<p><strong>Both engines translate line by line and keep line numbers identical</strong> (blank lines stay blank), so runtime errors can name the Niko line.</p>
+<p><code>niko.py</code></p>
+<ul>
+<li><code>words(expr)</code>: hides quoted text behind placeholders <code>__qN__</code>, applies regex rewrites</li>
+</ul>
+<p>(<code>is in</code>, <code>is not</code>, <code>is bigger than</code>, ..., <code>length of</code>, <code>item N of</code>, <code>numbers A to B</code>, <code>random A to B</code>), restores text.</p>
+<ul>
+<li><code>translate(line, ctx)</code>: one regex per statement form (order matters: <code>set item</code> before <code>set</code>, <code>ask number</code> before <code>ask</code>,</li>
+</ul>
+<p><code>otherwise if</code> before <code>otherwise</code>). Returns a Python line.</p>
+<ul>
+<li><code>transpile(src, globals_, names)</code>: first pass finds function parameters, top-level variable names (the "globals"),</li>
+</ul>
+<p>and all names (for did-you-mean). Inside a function, assignments to a global use <code>globals()["x"] = ...</code>. Checks that <code>otherwise</code> follows an <code>if</code>.</p>
+<ul>
+<li><code>LIB</code> dict: all helpers plus <code>yes</code>/<code>no</code>/<code>nothing</code>. <code>HELPER_NAMES</code>: used for suggestions.</li>
+<li><code>run()</code> executes with friendly errors; <code>repl()</code> keeps one environment between lines.</li>
+</ul>
+<p><code>ide/niko-ide.html</code> (single file, no dependencies)</p>
+<ul>
+<li>Region between <code>/*&lt;TRANSPILER&gt;*/</code> and <code>/*&lt;/TRANSPILER&gt;*/</code> is the engine (also loaded by <code>tests/ide_harness.js</code>).</li>
+</ul>
+<p>It has the same <code>words</code> / <code>translate</code> / <code>transpile</code> structure, but emits JavaScript: block braces come from an indentation stack, <code>var</code> for locals, <code>await</code> is inserted before calls to user functions, every statement is prefixed with <code>__st.l=N;</code> (current line for errors), loops call <code>await __tick()</code> (keeps the page responsive and makes Stop work). <code>diagnose()</code> compiles the output and bisects to the first bad line for the Problems panel.</p>
+<ul>
+<li><code>LIB</code> (helpers), <code>ENV</code> (names passed into the generated function), <code>HELPERS</code> (suggestions).</li>
+<li>REPL tab: statements run inside <code>with(proxy)</code> so variables persist; functions are emitted as <code>name = async function(...)</code>.</li>
+<li>UI: editor is a transparent <code>&lt;textarea&gt;</code> over a highlighted <code>&lt;pre&gt;</code>; autocomplete, palette (Ctrl+Shift+P), files in localStorage.</li>
+</ul>
+<p><strong>Checklist: add a helper</strong> (example: <code>title(t)</code>) 1. <code>niko.py</code>: add to <code>LIB</code> and <code>HELPER_NAMES</code>. 2. IDE: add to <code>LIB</code>, <code>ENV</code>, <code>HELPERS</code>, the highlight <code>BUILT</code> set, <code>SNIP</code> list, and the <code>REF</code> sheet. 3. Guide <code>docs/niko-guide.html</code>: add an A to Z entry (and an example if useful). 4. Add <code>tests/cases/NAME.niko</code> (+ <code>.in</code> if it asks) and <code>.out</code>; run <code>python tests/run_tests.py --ide</code>.</p>
+<p><strong>Checklist: add a statement</strong>: add a regex to <code>translate</code> in both engines (mind ordering), decide how it is highlighted (<code>STMT</code>/<code>CTRL</code> sets in the IDE), add tests, update the guide's "language rules" chapter.</p>
+<h2>8. Running things</h2>
+<pre><code>python niko.py examples/hello.niko           run a program
+python niko.py examples/hello.niko --show    print the generated Python
+python niko.py                               open the REPL
+python tests/run_tests.py --ide              all test cases, both engines (needs node for --ide)</code></pre>
+<h2>9. Roadmap ideas (pick one at a time)</h2>
+<p>1. Optional type notes, e.g. <code>set age to 12 as number</code>, checked at run time with friendly errors. 2. Splitting programs into files: <code>use "helpers.niko"</code>. 3. Records with functions, or a simple <code>thing</code> (class) syntax in words. 4. More helpers: sorting by a key, filtering, <code>index_of</code>, string formatting, JSON, dates. 5. Column numbers and a caret in syntax errors; a "why" line for common mistakes. 6. Remove the engine differences in section 6 (strict <code>+</code>, division check, explicit truthiness rules). 7. A pip package (<code>pip install niko</code>, <code>niko file.niko</code>) and a VS Code extension (highlighting rules are in the IDE's <code>highlight()</code>). 8. A written grammar plus a conformance suite that any new engine must pass.</p>
+<h2>10. Example programs</h2>
+<pre><code>ask number "Degrees Celsius? " into c
+say c, "C is", c * 9 / 5 + 32, "F"</code></pre>
+<pre><code>to factorial with n:
+    if n is at most 1:
+        give back 1
+    give back n * factorial(n - 1)
+
+say factorial(5)</code></pre>
+<pre><code>set counts to {}
+for each word in split("the cat and the hat", " "):
+    if word is in counts:
+        set counts[word] to counts[word] + 1
+    otherwise:
+        set counts[word] to 1
+say counts</code></pre>
+<h2>11. Brand</h2>
+<p>Mascot: a geometric, low-poly owl in blue and purple with yellow eyes. Files are in <code>assets/</code>: <code>logo.png</code> (full logo, transparent, made for dark backgrounds: white "niko" plus cyan ".niko"), <code>niko-owl.png</code> and <code>niko-owl-{512,360,180,64,32}.png</code> (owl only, works on light and dark). Palette: cobalt <code>#226edf</code>, deep navy <code>#011466</code>, cyan <code>#48d6f4</code>, violet <code>#2f21b3</code> to <code>#7a3cff</code>, eye yellow <code>#ffc107</code>. <code>social-preview.png</code> is the 1280x640 card for GitHub's social preview. On light backgrounds use the owl-only files, because the wordmark in <code>logo.png</code> is white.</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

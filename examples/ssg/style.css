@@ -1,0 +1,108 @@
+/* niko-ssg default theme: clean, readable, calm. */
+:root {
+  --bg: #faf9f7;
+  --ink: #23272f;
+  --muted: #6b7280;
+  --accent: #1d4ed8;
+  --code-bg: #f1ede6;
+  --rule: #e5e0d8;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.65;
+  font-size: 17px;
+}
+
+header {
+  background: #23272f;
+  color: #f3f4f6;
+  padding: 1rem 1.5rem;
+}
+
+header .brand a {
+  color: #fff;
+  font-family: system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.15rem;
+  text-decoration: none;
+}
+
+nav {
+  margin-top: 0.6rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  font-family: system-ui, sans-serif;
+  font-size: 0.85rem;
+}
+
+nav a { color: #c7d2fe; text-decoration: none; }
+nav a:hover { color: #fff; text-decoration: underline; }
+
+main {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+h1, h2, h3 {
+  font-family: system-ui, sans-serif;
+  line-height: 1.25;
+  margin-top: 2.2em;
+}
+
+h1 { font-size: 1.9rem; border-bottom: 2px solid var(--rule); padding-bottom: 0.35rem; }
+h2 { font-size: 1.45rem; }
+h3 { font-size: 1.15rem; }
+
+a { color: var(--accent); }
+a:hover { text-decoration-thickness: 2px; }
+
+code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+}
+
+pre {
+  background: #23272f;
+  color: #e8e6e1;
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-size: 0.82rem;
+}
+
+ul { padding-left: 1.5rem; }
+li { margin: 0.35rem 0; }
+li > code, p > code { white-space: nowrap; }
+
+hr {
+  border: none;
+  border-top: 1px solid var(--rule);
+  margin: 2.5rem 0;
+}
+
+footer {
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 1.5rem;
+  font-family: system-ui, sans-serif;
+}

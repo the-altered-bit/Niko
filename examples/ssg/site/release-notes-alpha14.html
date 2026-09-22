@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 14 release notes (2026-09-21) — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 14 release notes (2026-09-21)</h1>
+<p><strong>Standard library.</strong> Four pure-Niko modules bundled with Niko 2, usable from any program on any backend — VM, WASM, and native, byte-identical:</p>
+<pre><code>import "stdlib/text.niko" as text
+import "stdlib/math.niko" as math
+import "stdlib/lists.niko" as lists
+import "stdlib/records.niko" as records
+
+say text.title("hello WORLD")      # Hello World
+say math.gcd(12, 18)               # 6
+say lists.chunk([1, 2, 3, 4, 5], 2) # [[1, 2], [3, 4], [5]]
+say records.merge({x: 1}, {y: 2})   # {x: 1, y: 2}</code></pre>
+<h2>The library</h2>
+<p><strong>stdlib/text</strong> — <code>title</code>, <code>capitalize</code>, <code>pad_left</code>, <code>pad_right</code>, <code>repeat</code>, <code>slugify</code>, <code>words</code>, <code>lines</code>, <code>truncate</code>, <code>is_blank</code>, <code>reverse_text</code>, <code>count_words</code>.</p>
+<p><strong>stdlib/math</strong> — <code>clamp</code>, <code>lerp</code>, <code>gcd</code>, <code>is_prime</code>, <code>factorial</code>, <code>median</code>, <code>sign</code>, <code>is_even</code>, <code>is_odd</code>, <code>digits</code>.</p>
+<p><strong>stdlib/lists</strong> — <code>chunk</code>, <code>zip</code>, <code>flatten</code>, <code>take</code>, <code>drop</code>, <code>pluck</code>, <code>group_by</code>, <code>partition</code>, <code>frequencies</code>.</p>
+<p><strong>stdlib/records</strong> — <code>record_keys</code>, <code>merge</code>, <code>pick_keys</code>, <code>omit</code>, <code>get_or</code>, <code>invert</code>, <code>map_values</code>.</p>
+<p>The full reference — every signature, a description, and a runnable example — is <code>STDLIB.md</code>, generated from the doc comments in the modules themselves (so it can't go stale: <code>tests/test_stdlib2.py</code> fails if it does; regenerate with <code>python3 tests/test_stdlib2.py --write-docs</code>).</p>
+<p>Deliberate non-goals: anything that is already a builtin (<code>upper</code>, <code>split</code>, <code>sorted</code>, <code>unique</code>, <code>sum</code>, <code>average</code>, <code>max</code>, …) is not duplicated — the stdlib builds on the builtins, with one pragmatic exception: <code>records.record_keys(r)</code> is a <code>keys()</code> that can't be shadowed (a parameter named <code>keys</code>, as in <code>omit(r, keys)</code>, shadows the builtin inside that function's body, so the helper exists for exactly that case). No new builtins were added for this alpha; everything is plain Niko 2 (loops, closures, match patterns, first-class functions), which is why all three backends get it for free.</p>
+<h2>Search path</h2>
+<p><code>import</code> now resolves in a documented order:</p>
+<p>1. the importing file's directory, 2. each <code>NIKO_PATH</code> directory (env var, <code>:</code>-separated), 3. the bundled standard library — for paths starting with <code>stdlib/</code>, 4. the current working directory.</p>
+<p>A <code>stdlib/</code> folder next to your file or on <code>NIKO_PATH</code> shadows the bundled one, so you can vendor or experiment. Bare <code>import "text.niko"</code> does <em>not</em> find the stdlib — the <code>stdlib/</code> prefix is required.</p>
+<p>Because modules desugar to one program before any backend compiles them (Alpha 13), WASM and native binaries bundle the stdlib source at compile time; there is no file lookup at runtime on those backends.</p>
+<h2>Determinism rule</h2>
+<p>Stdlib code is 100% deterministic and backend-portable: no randomness, no clock, no file I/O (file builtins don't exist on WASM). Preconditions pure Niko can't enforce (e.g. <code>chunk</code> needs <code>n &gt;= 1</code>) are documented on the function, not guarded.</p>
+<h2>Tests</h2>
+<p><code>tests/test_stdlib2.py</code>:</p>
+<ul>
+<li>every <code>niko2/stdlib/*.niko</code> passes <code>niko2 check</code>, has a doc comment</li>
+</ul>
+<p>(with a runnable example) for every function, and keeps a clean top level (no stray <code>say</code>/<code>set</code>);</p>
+<ul>
+<li><strong>every doc example is executed</strong> — the examples are the test corpus.</li>
+</ul>
+<p>Documented output must equal actual <code>say</code> output, or the suite fails;</p>
+<ul>
+<li>the whole example corpus runs 3-way differential (VM/WASM/native,</li>
+</ul>
+<p>byte-identical) and twice for determinism;</p>
+<ul>
+<li>error cases: <code>import "stdlib/nope.niko"</code> →</li>
+</ul>
+<p><code>cannot find module "stdlib/nope.niko"</code> with the caret on the import line; <code>NIKO_PATH</code> shadowing works.</p>
+<h2>Limits</h2>
+<ul>
+<li>No package manager or registry — that's a future alpha.</li>
+<li><code>niko2 lsp</code> stays single-file: completion/hover don't know about</li>
+</ul>
+<p>stdlib functions yet.</p>
+<ul>
+<li>The legacy <code>use "text"</code> builtin-module registry (<code>niko2/stdlib/</code></li>
+</ul>
+<p><code>__init__.py</code>, Alpha 5) is unrelated to <code>import "stdlib/text.niko"</code>; both keep working.</p>
+<h2>Also fixed: builtin calls are direct on the VM</h2>
+<p>Verifying the stdlib caught a real backend divergence: <code>lists.group_by</code> calls the <code>text</code> builtin, but with <code>import "stdlib/text.niko" as text</code> the VM resolved that bare call to the import alias and crashed, while WASM/native (and the checker's Alpha 10 rule) always send a builtin name in call position straight to the builtin. The VM now emits a <code>CALL_BUILTIN</code> opcode for that shape, so the rule is identical on all three backends: <strong>a builtin name in direct call position always invokes the builtin</strong> — a shadowing variable, <code>to</code>, or import alias is invisible there (shadowing still works as a value and for <code>m.attr</code> access). <code>tests/test_closures.py</code> pins the rule.</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

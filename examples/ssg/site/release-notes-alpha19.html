@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 19 release notes (2026-09-22) — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 19 release notes (2026-09-22)</h1>
+<p><strong>The package manager grows a registry.</strong> Alpha 16 let you install packages from a folder or a git URL; now you can publish versioned packages to a registry and install them by name with version ranges. <code>niko2 get greet</code> installs the newest <code>greet</code>; <code>niko2 get greet@^1.0</code> installs the newest 1.x; <code>niko2 get --update greet</code> upgrades a pinned package when a newer matching version appears. A registry is just a directory with an <code>index.json</code> plus tarballs (a remote index over HTTP works for installs too), and every tarball is sha256-verified on download. Compiling, running, and everything else still resolve packages <strong>offline</strong> from the local cache — only <code>get</code> and <code>publish</code> ever touch the network.</p>
+<pre><code class="language-console">$ niko2 publish --registry /srv/niko-registry
+✓ published greet 1.1.0 to /srv/niko-registry
+
+$ export NIKO_REGISTRY=/srv/niko-registry   # or [registry] url = ... in ~/.niko/config.toml
+$ niko2 get greet@^1.0
+✓ installed greet 1.1.0 → /home/casper/.niko/packages/greet-1.1.0
+
+$ niko2 get --update greet
+greet is already at the newest matching version (1.1.0)</code></pre>
+<pre><code class="language-niko"># the consumer program (unchanged — imports take no version)
+import "pkg:greet/main.niko" as greet
+say greet.hello("Casper")</code></pre>
+<p>Try it yourself with a local registry: publish any package folder with <code>niko2 publish --registry &lt;dir&gt;</code>, point <code>NIKO_REGISTRY</code> at <code>&lt;dir&gt;</code>, and <code>niko2 get &lt;name&gt;</code> — no network needed.</p>
+<h2>How it works</h2>
+<ul>
+<li><strong>Version ranges</strong> (<code>niko2/semver.py</code>): <code>*</code>, <code>1.2.3</code>, <code>1.2</code> (=<code>1.2.x</code>),</li>
+</ul>
+<p>npm-style <code>^1.2.3</code> (leftmost non-zero component pinned, so <code>^0.2.3</code> stays in 0.2.x) and <code>~1.2.3</code> (same minor), comparators <code>&gt;=</code>/<code>&gt;</code>/<code>&lt;=</code>/<code>&lt;</code>, <code>=</code>/<code>==</code>, and comma AND (<code>&gt;=1.0, &lt;2.0</code>). The solver picks the highest version satisfying the range; bad ranges are plain-English errors.</p>
+<ul>
+<li><strong><code>niko2 get &lt;name&gt;[@&lt;range&gt;]</code></strong> installs the newest matching version</li>
+</ul>
+<p>and writes the pin <code>{version, source: "registry:&lt;spec&gt;", range}</code> into <code>niko.lock</code>. <code>niko2 get &lt;name&gt;</code> alone means the newest version, range <code>*</code>.</p>
+<ul>
+<li><strong><code>niko2 get --update &lt;name&gt;</code></strong> re-resolves using the pin's range and</li>
+</ul>
+<p>upgrades the install + pin only when a newer matching version exists; otherwise a friendly "already at the newest matching version".</p>
+<ul>
+<li><strong><code>niko2 publish [--registry &lt;dir&gt;] [--force]</code></strong> builds a tarball</li>
+</ul>
+<p>(<code>.git/</code>, <code>__pycache__/</code>, <code>*.pyc</code> excluded), records its sha256, and updates the registry index atomically. Overwriting a published version needs <code>--force</code>.</p>
+<ul>
+<li><strong>Integrity:</strong> <code>sha256</code> is mandatory in the index; a mismatch is a</li>
+</ul>
+<p>hard error and the bad download is deleted. Tarballs can't escape the registry directory or contain absolute/<code>..</code> paths.</p>
+<ul>
+<li><strong>Disambiguation:</strong> a bare word is a registry lookup, so a local</li>
+</ul>
+<p>directory named exactly like a package needs <code>./</code> (<code>niko2 get ./mydir</code>); anything with a <code>/</code>, <code>.</code>, or URL scheme falls through to the old folder/git-URL handling, which is unchanged.</p>
+<ul>
+<li><strong>Dependencies:</strong> packages declare <code>[dependencies]</code> (<code>lib = "^1.0"</code>)</li>
+</ul>
+<p>in <code>niko.toml</code>; <code>get</code> installs the full transitive closure from the same registry, skipping anything already cached that satisfies the range. Only directly-installed packages get lockfile pins.</p>
+<ul>
+<li><strong>Selection:</strong> <code>NIKO_REGISTRY</code> (index URL, <code>file://</code> URL, or local</li>
+</ul>
+<p>dir) wins; otherwise <code>~/.niko/config.toml</code> <code>[registry] url</code>.</p>
+<p><strong>Deliberate limits (for now):</strong> no auth and no publishing to remote registries (clear errors, not silent gaps); transitive dependencies are not pinned in the lockfile; no version-range solving at import time (imports stay version-free — the lockfile pin decides); <code>niko2 get --force &lt;src&gt;</code> is still rejected by the pre-existing argparse quirk (flags go after positionals, except <code>get --update &lt;name&gt;</code> which is special-cased). See <code>ALPHA19_DESIGN.md</code> and <code>niko2/KNOWN_LIMITATIONS.md</code>.</p>
+<p>Full suite green: 26 Niko 1 cases, 15 Niko 2 cases + nikoir round trip, all <code>tests/test_*.py</code> (new: <code>tests/test_registry.py</code>, hermetic — local registry fixture, no network, real <code>~/.niko</code> untouched).</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

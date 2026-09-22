@@ -1,0 +1,21 @@
+# pages_test.niko — tests for the niko-ssg page helpers.
+import "pages.niko" as pagekit
+
+to test_slug_for:
+    assert pagekit.slug_for("STDLIB.md") is "stdlib"
+    assert pagekit.slug_for("RELEASE_NOTES_ALPHA10.md") is "release-notes-alpha10"
+    assert pagekit.slug_for("NIKO_AI_BRIEF.md") is "niko-ai-brief"
+
+to test_slug_for_with_directory:
+    assert pagekit.slug_for("docs/STDLIB.md") is "stdlib"
+
+to test_build_nav:
+    set pages to [{"slug": "stdlib", "nav_title": "Stdlib"}, {"slug": "brief", "nav_title": "Brief"}]
+    set nav to pagekit.build_nav(pages)
+    assert nav is "<nav>\n  <a href=\"index.html\">Home</a>\n  <a href=\"stdlib.html\">Stdlib</a>\n  <a href=\"brief.html\">Brief</a>\n</nav>\n"
+
+to test_build_index_content:
+    set pages to [{"slug": "stdlib", "nav_title": "Stdlib"}]
+    set content to pagekit.build_index_content(pages)
+    assert starts_with(content, "<h1>Niko 2.0 documentation</h1>")
+    assert has(content, "<a href=\"stdlib.html\">Stdlib</a>")

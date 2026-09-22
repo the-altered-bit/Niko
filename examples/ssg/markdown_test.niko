@@ -1,0 +1,106 @@
+# markdown_test.niko — tests for the niko-ssg Markdown converter.
+import "markdown.niko" as markdown
+
+to test_escape_html:
+    assert markdown.escape_html("a & b") is "a &amp; b"
+    assert markdown.escape_html("<b>") is "&lt;b&gt;"
+    assert markdown.escape_html("x < y & y > z") is "x &lt; y &amp; y &gt; z"
+
+to test_escape_attr:
+    assert markdown.escape_attr("say \"hi\"") is "say &quot;hi&quot;"
+
+to test_headings:
+    assert markdown.markdown_to_html("# Hello") is "<h1>Hello</h1>\n"
+    assert markdown.markdown_to_html("## Sub") is "<h2>Sub</h2>\n"
+    assert markdown.markdown_to_html("### Deep") is "<h3>Deep</h3>\n"
+
+to test_heading_needs_space:
+    # "#nospace" is not a heading in this subset; it stays a paragraph.
+    assert markdown.markdown_to_html("#nospace") is "<p>#nospace</p>\n"
+
+to test_paragraph_joining:
+    set html to markdown.markdown_to_html("line one\nline two\n\nnext para")
+    assert html is "<p>line one line two</p>\n<p>next para</p>\n"
+
+to test_bold:
+    assert markdown.render_inline("a **bold** b") is "a <strong>bold</strong> b"
+
+to test_italic:
+    assert markdown.render_inline("a *em* b") is "a <em>em</em> b"
+
+to test_bold_inside_italic:
+    assert markdown.render_inline("*a **b** c*") is "<em>a <strong>b</strong> c</em>"
+
+to test_inline_code:
+    assert markdown.render_inline("use `x` here") is "use <code>x</code> here"
+    assert markdown.render_inline("`<b>`") is "<code>&lt;b&gt;</code>"
+
+to test_link:
+    set html to markdown.render_inline("see [docs](https://example.com/x) now")
+    assert html is "see <a href=\"https://example.com/x\">docs</a> now"
+
+to test_link_label_formatting:
+    set html to markdown.render_inline("[**bold** label](u)")
+    assert html is "<a href=\"u\"><strong>bold</strong> label</a>"
+
+to test_not_a_link:
+    # "[text]" with no "(url)" after it stays literal text.
+    assert markdown.render_inline("[1, 2]") is "[1, 2]"
+    assert markdown.render_inline("[a](b") is "[a](b"
+
+to test_unmatched_markers_stay_literal:
+    assert markdown.render_inline("a ** b") is "a ** b"
+    assert markdown.render_inline("a * b") is "a * b"
+    assert markdown.render_inline("a ` b") is "a ` b"
+
+to test_unordered_list:
+    set html to markdown.markdown_to_html("- one\n- two\n\nafter")
+    assert html is "<ul>\n<li>one</li>\n<li>two</li>\n</ul>\n<p>after</p>\n"
+
+to test_list_item_formatting:
+    set html to markdown.markdown_to_html("- **bold** item")
+    assert html is "<ul>\n<li><strong>bold</strong> item</li>\n</ul>\n"
+
+to test_fenced_code_block:
+    set html to markdown.markdown_to_html("```niko\nsay \"hi\"\n```")
+    assert html is "<pre><code class=\"language-niko\">say \"hi\"</code></pre>\n"
+
+to test_fenced_code_no_language:
+    set html to markdown.markdown_to_html("```\n<raw>\n```")
+    assert html is "<pre><code>&lt;raw&gt;</code></pre>\n"
+
+to test_code_block_keeps_indent:
+    set html to markdown.markdown_to_html("```\n  indented\n```")
+    assert html is "<pre><code>  indented</code></pre>\n"
+
+to test_code_block_ignores_markdown:
+    # "# " inside a fence is code, not a heading.
+    set html to markdown.markdown_to_html("```\n# not a heading\n```")
+    assert html is "<pre><code># not a heading</code></pre>\n"
+
+to test_unclosed_fence_still_renders:
+    set html to markdown.markdown_to_html("```\ncode here")
+    assert html is "<pre><code>code here</code></pre>\n"
+
+to test_horizontal_rule:
+    assert markdown.markdown_to_html("---") is "<hr>\n"
+
+to test_page_title:
+    assert markdown.page_title("# My Title\n\nbody") is "My Title"
+    assert markdown.page_title("no heading here") is "Untitled"
+
+to test_plain_title:
+    assert markdown.plain_title("Alpha 27: `niko2 test` + `assert`") is "Alpha 27: niko2 test + assert"
+
+to test_drop_chars:
+    assert markdown.drop_chars("hello", 2) is "llo"
+    assert markdown.drop_chars("hi", 5) is ""
+
+to test_slice_between:
+    assert markdown.slice_between("hello", 2, 4) is "ell"
+    assert markdown.slice_between("hello", 3, 2) is ""
+
+to test_find_from:
+    assert markdown.find_from("ababa", "ba", 1) is 2
+    assert markdown.find_from("ababa", "ba", 3) is 4
+    assert markdown.find_from("ababa", "zz", 1) is 0

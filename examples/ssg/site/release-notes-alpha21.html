@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 21 release notes (2026-09-22) — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 21 release notes (2026-09-22)</h1>
+<p><strong>A tooling polish batch.</strong> Alpha 21 fixes three small, long-standing paper cuts — the <code>to name: -&gt; type:</code> parser quirk, conditional breakpoints in the debugger, and LSP hover following imports — and officially cuts one item (<code>use</code> under the debugger) as needing a redesign, not a patch.</p>
+<h2>Fixed</h2>
+<ul>
+<li><strong>Parser: <code>to greet: -&gt; text:</code> now parses.</strong> A colon after the function</li>
+</ul>
+<p>name (or after the params, before the <code>-&gt;</code> return-type arrow) no longer becomes part of the identifier. <code>to greet: -&gt; text:</code> defines <code>greet</code>; <code>to add with a, b: -&gt; number:</code> defines <code>add</code> with params <code>a</code>, <code>b</code>. The fix is narrow: it only changes parse output for headers that previously produced <em>uncallable</em> functions (a function named <code>greet:</code> could never be invoked), so nothing that worked before can change behavior. Typed params (<code>n: number</code>) and mid-string colons are untouched; line numbers are preserved.</p>
+<ul>
+<li><strong>Conditional breakpoints.</strong> DAP <code>setBreakpoints</code> now honors the</li>
+</ul>
+<p><code>condition</code> field: the condition is evaluated in the paused frame's context (reusing the Alpha 18 <code>evaluate</code> machinery — typechecked against locals, run on a fresh VM with an instruction budget) and the debugger only stops when it's truthy. No or empty condition behaves exactly as before. A condition that fails to parse/typecheck/evaluate emits a <code>Niko warning: breakpoint condition "…" failed: &lt;reason&gt;</code> through the normal output channel and the breakpoint stops as if unconditional — stopping surfaces the error; silently skipping would be invisible. The session never dies or hangs.</p>
+<ul>
+<li><strong>Cross-file LSP hover.</strong> <code>textDocument/hover</code> now follows imports the</li>
+</ul>
+<p>same way go-to-definition does (Alpha 17). Hovering <code>m.add</code> shows the signature and doc comment from the module file; same for <code>pkg:</code> package imports. Unresolvable imports yield null hover, never an error.</p>
+<h2>Cut (with a reason)</h2>
+<ul>
+<li><strong><code>use</code> under the debugger is still unsupported.</strong> Empirical check</li>
+</ul>
+<p>showed the "small fix" (pre-loading used files via <code>VMLoader</code>) would produce a <em>wrong</em> session, not a limited one: used files compile as separate modules with ambiguous <code>&lt;main&gt;</code>/plain qualname frames, the debugger can't attribute breakpoints, and entry breakpoints would spuriously fire. The real fix is to route <code>use</code> through the module pipeline with <code>__use$K</code> wrapper prefixes (reusing the Alpha 18 attribution scheme) — one change that would fix <code>niko2 run</code>, the debugger, and a nested-function orphaning bug together. That's a future sprint, not a patch.</p>
+<h2>Tests</h2>
+<ul>
+<li><code>tests/test_function_header.py</code> (new): parser assertions + end-to-end</li>
+</ul>
+<p>runs + VM/WASM/native differential for the colon forms.</p>
+<ul>
+<li><code>tests/niko2_cases/function_colon.niko</code> (+<code>.out</code>): <code>to greet: -&gt; text:</code></li>
+</ul>
+<p>and <code>to add with a, b: -&gt; number:</code> defined and called.</p>
+<ul>
+<li><code>tests/test_dap.py</code>: 4 new cases — condition true stops once,</li>
+</ul>
+<p>condition false never stops, bad condition warns + stops + session survives, empty condition stops every iteration.</p>
+<ul>
+<li><code>tests/test_lsp.py</code>: hover on <code>m.add</code>/<code>m.tau</code> shows signature + doc</li>
+</ul>
+<p>comment from the module file; <code>pkg:</code>-pinned hover; missing-module hover is null.</p>
+<h2>Docs</h2>
+<ul>
+<li><code>NIKO_AI_HANDOFF.md</code> (item 15), <code>NEXT_STEPS.md</code> (Alpha 21 complete;</li>
+</ul>
+<p><code>use</code>-through-module-pipeline recorded as future work), <code>niko2/KNOWN_LIMITATIONS.md</code> (removed the fixed bullets; the <code>use</code>-under-debugger bullet now points at the module-pipeline fix).</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

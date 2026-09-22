@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 Alpha 5 (work in progress) — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 Alpha 5 (work in progress)</h1>
+<p>This is not a full alpha yet — it covers the Alpha 5 roadmap items as they land, plus the bug-fixing and test infrastructure that came up while verifying them. See <code>niko2/KNOWN_LIMITATIONS.md</code> for the fuller picture of what Niko 2 can and can't do right now.</p>
+<h2>WIP12 — Niko 1 stdlib gap closed (this snapshot)</h2>
+<ul>
+<li>The 9 missing standard-library helpers are now implemented in Niko 2:</li>
+</ul>
+<p><code>starts_with</code>, <code>ends_with</code>, <code>count_of</code>, <code>pick</code>, <code>write_file</code>, <code>append_file</code>, <code>read_file</code>, <code>read_lines</code>, <code>file_exists</code> — with Niko 1's semantics (e.g. <code>I couldn't find the file "x".</code>, <code>I can't pick from an empty list.</code>, 1-based positions, <code>write_file</code>/<code>append_file</code> format values with the same <code>fmt</code> as <code>say</code>).</p>
+<ul>
+<li>Wired into both builtin registries (<code>niko2/vm.py</code> for the VM,</li>
+</ul>
+<p><code>niko2/runtime.py</code> for the tree-walker and <code>stdlib.module_symbols</code>), registered as known names in the typechecker (so <code>check</code>/<code>run</code> accept them and typo suggestions can propose them), and grouped in <code>niko2/stdlib.py</code> (<code>text</code> += <code>starts_with</code>/<code>ends_with</code>, <code>collections</code> += <code>count_of</code>/<code>pick</code>, new <code>files</code> group).</p>
+<ul>
+<li><strong>Files decision:</strong> real files, relative paths resolved against the</li>
+</ul>
+<p>process working directory — matching Niko 1's desktop engine. Documented in <code>niko2/KNOWN_LIMITATIONS.md</code>; <code>stdlib.module_symbols('files')</code> is the seam for a future sandboxed/virtual-files backend.</p>
+<ul>
+<li>Tests: <code>tests/niko2_cases/stdlib_text.niko</code> (+ <code>.out</code>) for the</li>
+</ul>
+<p>deterministic helpers; <code>tests/test_stdlib.py</code> drives <code>niko2 run</code> in a TemporaryDirectory for the file helpers (write/append/read round trip, missing-file error, exit codes) and <code>pick</code> (membership + empty-list error).</p>
+<h2>WIP11 — source columns and carets in diagnostics</h2>
+<p>The remaining Alpha 5 diagnostics item is done: errors now point at the exact spot, not just the line.</p>
+<ul>
+<li><strong>New module <code>niko2/diagnostics.py</code></strong>: a <code>Diagnostic</code> exception carrying</li>
+</ul>
+<p><code>line</code> / <code>col</code> / <code>end_col</code>, plus a <code>token</code> hint for passes that know the offending text but not its position (the typechecker works on the AST without the source — the formatter resolves the token against the source line). <code>format_diagnostic()</code> renders:</p>
+<pre><code>  Niko error in prog.niko: line 1, column 5
+    say totl(42)
+        ^^^^
+  unknown name "totl". Did you mean "text"?</code></pre>
+<ul>
+<li><strong><code>ParseError</code> is now a <code>Diagnostic</code></strong>: every parser raise site carries a</li>
+</ul>
+<p>real column — statement keywords, the missing-<code>:</code> position, the offending name in <code>add</code>/<code>take</code>/<code>ask ... into</code>, dangling operators (<code>say 2 +</code> points at the <code>+</code>), unclosed <code>(</code> / <code>{</code>, and bad characters (a lexer <code>LexError</code> becomes a clean parse error instead of a traceback).</p>
+<ul>
+<li><strong><code>TypeErrorNiko</code> and <code>CompileError</code> are <code>Diagnostic</code>s too</strong>: the</li>
+</ul>
+<p>unknown-name error passes the name as a token so the caret spans it; other type errors echo the source line; compiler errors (e.g. <code>stop</code> outside a loop) render through the same formatter instead of a traceback.</p>
+<ul>
+<li><strong>CLI</strong>: <code>run</code> / <code>check</code> / <code>build</code> / <code>disasm</code> / <code>format</code> all render the</li>
+</ul>
+<p>new format; exit codes unchanged (1 on error).</p>
+<ul>
+<li><strong>Tests</strong>: <code>tests/test_diagnostics.py</code> now asserts columns, caret spans,</li>
+</ul>
+<p>and source-line echo for parse errors, type errors, and the typo suggestion. Note: expression-level carets resolve by searching the source line for the offending token (first match), so they can be approximate when the same text appears twice on one line.</p>
+<h2>WIP10 — typo suggestions in diagnostics</h2>
+<ul>
+<li>Unknown identifiers now suggest a close match: the typechecker matches</li>
+</ul>
+<p>a mistyped name against builtin helpers and declared names and reports, e.g. <code>unknown name "totl". Did you mean "text"?</code></p>
+<ul>
+<li>Regression test: <code>tests/test_diagnostics.py</code>.</li>
+</ul>
+<h2>Added</h2>
+<ul>
+<li><strong>Serialized <code>.nikoir</code> loader</strong> (first Alpha 5 milestone item). A file</li>
+</ul>
+<p>produced by <code>niko2 build file.niko</code> can now be run or disassembled directly — <code>niko2 run file.nikoir</code> / <code>niko2 disasm file.nikoir</code> — without the original <code>.niko</code> source and without re-parsing or re-typechecking. New module: <code>niko2/nikoir.py</code> (<code>save_nikoir</code> / <code>load_nikoir</code>).</p>
+<ul>
+<li><strong><code>tests/run_niko2_tests.py</code></strong>: the first regression suite that actually</li>
+</ul>
+<p>exercises the Niko 2 pipeline end to end (parse -&gt; check -&gt; compile -&gt; VM), including a build -&gt; load -&gt; run round trip through a <code>.nikoir</code> artifact. <code>tests/run_tests.py</code> only ever tested Niko 1 (<code>niko.py</code>); Niko 2 had no automated regression coverage before this.</p>
+<ul>
+<li><code>niko2/KNOWN_LIMITATIONS.md</code>: documents which Niko 1 statements/helpers</li>
+</ul>
+<p>are not yet in Niko 2, and the bugs listed below.</p>
+<h2>Fixed</h2>
+<ul>
+<li>Recursive functions crashed with "I don't know what \"NAME\" is." in the</li>
+</ul>
+<p>VM — a closure-construction bug in <code>VM.execute()</code>.</p>
+<ul>
+<li><code>N of LIST</code> (list indexing) passed its arguments to <code>item_of</code> swapped,</li>
+</ul>
+<p>breaking or corrupting every list-index expression.</p>
+<ul>
+<li><code>record.attr</code> dot-access silently did nothing (dropped the <code>.attr</code> part)</li>
+</ul>
+<p>instead of erroring or working — the AST/compiler/VM support existed but the parser never produced the node.</p>
+<ul>
+<li>The expression parser silently ignored trailing tokens it couldn't</li>
+</ul>
+<p>parse instead of raising an error (this is what let <code>.attr</code> disappear unnoticed).</p>
+<ul>
+<li><code>niko2</code>'s CLI always exited <code>0</code>, even on errors, because <code>__main__.py</code></li>
+</ul>
+<p>didn't propagate <code>main()</code>'s return code — breaking any CI/script relying on the exit status of <code>niko2 check</code>.</p>
+<h2>Verification</h2>
+<ul>
+<li><code>python tests/run_tests.py</code> — 26 cases, 0 failures (Niko 1, unaffected).</li>
+<li><code>python tests/run_niko2_tests.py</code> — 4 cases, 0 failures, plus a passing</li>
+</ul>
+<p><code>.nikoir</code> build/load/run round trip.</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

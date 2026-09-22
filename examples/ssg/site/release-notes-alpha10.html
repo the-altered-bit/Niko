@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 10 Release Notes (2026-09-21) — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</h1>
+<h2>Closures + first-class functions, on every backend</h2>
+<p>Nested <code>to</code> definitions now capture enclosing function locals <strong>by reference</strong>, and functions are real values — on the VM, the WASM backend, and the native backend, all byte-identical:</p>
+<pre><code>to counter with start:
+    set n to start
+    to bump:
+        set n to n + 1
+        give back n
+    give back bump
+set c to counter(10)
+say c()   # 11
+say c()   # 12</code></pre>
+<pre><code>to add with a, b:
+    give back a + b
+set f to add        # alias
+say f(2, 3)         # 5
+say f               # function "add"</code></pre>
+<p>Functions can be passed as arguments, returned from functions, and stored in lists/records (<code>pair[2]()</code>, <code>r["f"](1, 2)</code>).</p>
+<h2>Semantics (locked)</h2>
+<ul>
+<li><strong>Capture by reference.</strong> The closure and the enclosing function share</li>
+</ul>
+<p>one box per captured variable; writes are visible through every holder. Each call of the enclosing function gets fresh boxes, so two counters are independent.</p>
+<ul>
+<li><strong>Write-through.</strong> <code>set x to v</code> inside a nested function resolves</li>
+</ul>
+<p>lexically: if <code>x</code> isn't bound in the current function yet, the write goes to the enclosing function's box (this is what makes <code>set n to n + 1</code> work inside <code>bump</code>).</p>
+<ul>
+<li><strong>Loop closures share the variable</strong> (Python semantics): closures</li>
+</ul>
+<p>created in a <code>for each</code> loop all see the loop variable's final value.</p>
+<ul>
+<li><strong><code>say f</code> prints <code>function "add"</code></strong> (simple source name) on all backends.</li>
+<li><strong>Calling a non-function</strong> is a runtime error: `I can't call 5 as a</li>
+</ul>
+<p>function.<code> Statically-known non-callables are still rejected by the checker (</code>value is not callable`).</p>
+<ul>
+<li><strong>Builtins are not values.</strong> A bare builtin name is only legal as the</li>
+</ul>
+<p>direct target of a call; <code>set f to length</code> is a checker error: <code>can't use the builtin "length" as a value</code>. (<code>pi</code> is exempt — it's a number.) A user variable that shadows a builtin name still works as a value (<code>set text to "shadow"</code> / <code>say text</code>) and for attribute access (<code>text.title(...)</code>); in direct call position the builtin always wins (Alpha 14 made the VM match the checker/WASM/native on this).</p>
+<h2>How it's implemented</h2>
+<ul>
+<li><code>niko2/closures.py</code> (new, shared): <code>analyze_closures(tree)</code> maps every</li>
+</ul>
+<p><code>FunctionDef</code> to its <code>ClosureInfo</code> — unique <code>qualname</code> (<code>outer$inner</code>, deduped), <code>captures</code>, <code>boxes</code>, <code>nested</code>, <code>parent</code>. Handles deep pass-through (a middle function forwards boxes it doesn't use itself) and order-sensitive references (<code>set n to n + 1</code> reads the enclosing <code>n</code>).</p>
+<ul>
+<li><strong>VM</strong> (<code>niko2/vm.py</code>): <code>Cell</code> boxes; <code>LOAD</code>/<code>STORE</code> are cell-aware (no</li>
+</ul>
+<p>new opcodes); <code>VMFunction(code, cells, globals_env)</code>; <code>MAKE_FUNCTION</code> takes the qualname and wrap-or-creates cells in the defining frame; top-level functions install as values with no cells (recursion resolves through the shared module env).</p>
+<ul>
+<li><strong>WASM</strong> (<code>niko2/backends/wasm.py</code>): new <code>TAG_FUNCTION = 7</code>; function</li>
+</ul>
+<p>value = <code>[tag, table_idx, name_ptr, nparams, env_ptr]</code>; every Niko function gets the uniform <code>(env_ptr, nargs, args_ptr) -&gt; boxed</code> signature with one <code>funcref</code> table + <code>call_indirect</code>; boxed locals hold cell pointers. Design notes: <code>niko2/backends/WASM_DESIGN.md</code>.</p>
+<ul>
+<li><strong>Native</strong> (<code>niko2/backends/native.py</code>, <code>niko_runtime.c/.h</code>): new <code>NVal</code></li>
+</ul>
+<p>tag 7 <code>{func_id, name, env}</code>; same uniform-signature + cells-as-1-element- <code>NVal</code>-lists approach; <code>niko_call(line, fn, ...)</code> dispatches with tag check + arity panic. Design notes: <code>niko2/backends/NATIVE_DESIGN.md</code>.</p>
+<h2>Testing</h2>
+<ul>
+<li><code>tests/niko2_cases/closures.niko</code> (+<code>.out</code>): the canonical programs in</li>
+</ul>
+<p>the VM regression suite (13 niko2 cases total, 0 failures; also covers <code>.nikoir</code> round trip with nested functions).</p>
+<ul>
+<li><code>tests/test_closures.py</code>: VM-side assertions — the 8 canonical programs,</li>
+</ul>
+<p>checker rejections (builtin-as-value, shadowing still legal), runtime error messages, closure-analysis units, <code>.nikoir</code> round trip, and a <strong>3-way differential</strong> (VM vs WASM vs native, byte-identical; skips gracefully without node/cc).</p>
+<ul>
+<li><code>tests/test_wasm.py</code> / <code>tests/test_native.py</code>: each runs the same 8</li>
+</ul>
+<p>canonical programs through its backend against the expected output.</p>
+<ul>
+<li>Full suite green: 26 niko1 cases, 13 niko2 cases + nikoir round trip,</li>
+</ul>
+<p>all <code>test_*.py</code> (closures, results/match, wasm, native, stdlib, generics, diagnostics, formatter, project deps, LSP, DAP).</p>
+<h2>Still true</h2>
+<ul>
+<li>The VM constant-pool dedup bug (<code>yes</code>/<code>1</code>, <code>no</code>/<code>0</code>) is unchanged and</li>
+</ul>
+<p>still not mirrored by the backends.</p>
+<ul>
+<li><code>nikoir</code> format bumped to <code>'2'</code> (loads <code>'0'</code>/<code>'1'</code>/<code>'2'</code>).</li>
+</ul>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

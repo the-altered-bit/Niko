@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 8 Release Notes — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 8 Release Notes</h1>
+<p><strong>WebAssembly backend</strong> · 2026-09-21</p>
+<p>Alpha 8 adds a WebAssembly compilation target to Niko 2. <code>niko2 wasm</code> compiles checked Niko source to a standalone <code>.wasm</code> binary that runs on any WASM runtime via a small host shim (node.js provided).</p>
+<h2>What's new</h2>
+<ul>
+<li><strong><code>niko2 wasm &lt;file.niko&gt; [-o out.wasm] [--run]</code></strong> — compile to WASM;</li>
+</ul>
+<p><code>--run</code> executes it with node.js through the bundled host shim.</p>
+<ul>
+<li><strong><code>niko2/backends/</code> package</strong> — a <code>Backend</code> ABC (<code>compile(tree) -&gt; bytes</code>,</li>
+</ul>
+<p><code>output_extension</code>) plus a registry. This is the IR/backend interface seed that Alpha 9's native backend will build on.</p>
+<ul>
+<li><strong>Boxed value model</strong> — every Niko value is a heap pointer to</li>
+</ul>
+<p><code>[tag, payload...]</code>; tags: nothing, number (f64), text (UTF-8), yes/no, list, record, result.</p>
+<ul>
+<li><strong>Full language coverage</strong> (minus documented limits): arithmetic,</li>
+</ul>
+<p>text ops, lists, records, results, <code>if/otherwise</code>, <code>for each</code>, <code>while</code>, <code>match/when</code>, functions (incl. recursion), builtins, <code>say</code>/<code>ask</code> (ask reads via host import).</p>
+<ul>
+<li><strong>Differential tests</strong> — <code>tests/test_wasm.py</code> compiles 12 programs and</li>
+</ul>
+<p>diffs WASM stdout against VM stdout (skips if node is missing).</p>
+<h2>Known limits (see niko2/KNOWN_LIMITATIONS.md)</h2>
+<ul>
+<li>Numbers are f64; <code>upper</code>/<code>lower</code> are ASCII-only.</li>
+<li>No <code>use</code> imports, no file-I/O builtins, no method-call syntax.</li>
+<li>No closures over enclosing function locals (raises <code>CompileError</code>);</li>
+</ul>
+<p>the VM supports them, so this is a real parity gap.</p>
+<ul>
+<li>No first-class function values.</li>
+<li><code>ask</code> needs the host to supply stdin; <code>now()</code>/<code>today()</code>/<code>random_int</code></li>
+</ul>
+<p>come from the host environment.</p>
+<h2>VM bugs found (not mirrored)</h2>
+<ul>
+<li><strong>Constant-pool dedup</strong> (<code>ir.py</code>): Python <code>True == 1</code> / <code>False == 0</code>,</li>
+</ul>
+<p>so <code>constants.index(v)</code> can merge <code>yes</code>→<code>1</code> and <code>no</code>→<code>0</code>, printing the wrong one when both appear. WASM prints the correct value.</p>
+<h2>Files</h2>
+<ul>
+<li><code>niko2/backends/__init__.py</code>, <code>niko2/backends/wasm.py</code>,</li>
+</ul>
+<p><code>niko2/backends/wasm_host.cjs</code>, <code>niko2/backends/WASM_DESIGN.md</code></p>
+<ul>
+<li><code>tests/test_wasm.py</code></li>
+<li>CLI: <code>niko2 wasm</code> in <code>niko2/cli.py</code></li>
+</ul>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

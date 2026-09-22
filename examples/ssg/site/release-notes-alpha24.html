@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure) — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</h1>
+<p>Two things that were half-true in Alpha 19 are now fully true: <strong>registries over HTTP(S) actually work</strong> (with a short timeout and plain-English errors), and <strong><code>niko.lock</code> now pins the whole dependency tree</strong>, so a committed lockfile reproduces the exact same packages on a fresh machine.</p>
+<h2>What's new</h2>
+<p><strong>HTTP(S) registries work end to end.</strong> Point <code>NIKO_REGISTRY</code> at an index URL (<code>http://…/index.json</code>, or <code>https://</code>) and <code>niko2 get &lt;name&gt;</code> fetches the index and the tarballs over HTTP, verifying every sha256 as before. <code>file://</code> URLs never touch the network stack (plain local copy).</p>
+<p><strong>Network failures speak plain English, and fail fast.</strong> The fetch timeout is now <strong>10 seconds</strong> (was 30) for both the index and every tarball, and the common failure modes get their own messages instead of urllib's raw text:</p>
+<pre><code>$ NIKO_REGISTRY=http://127.0.0.1:9/index.json niko2 get greetpkg
+Niko error: could not fetch registry index from http://127.0.0.1:9/index.json:
+connection refused -- is anything serving the registry at 127.0.0.1?</code></pre>
+<p>DNS failures, timeouts (<code>timed out after 10 seconds -- the registry may be down or unreachable</code>), and HTTP statuses (<code>the server replied with HTTP 404 Not Found</code>) are all covered. A bad download can never leave a half-installed package behind: the cache directory is only touched <em>after</em> the tarball is downloaded <strong>and</strong> its sha256 verified <strong>and</strong> its manifest checks pass (temp dirs are always cleaned up).</p>
+<p><strong><code>niko2 lock</code> pins the full transitive closure.</strong> Transitive dependencies now get <code>{version, source, range}</code> pins just like top-level imports — <code>range</code> is the range the <em>parent package</em> asked for. Re-locking still never silently upgrades: a pinned version that is still installed and still satisfies the parent's range is kept; otherwise the newest <em>installed</em> satisfying version is pinned. Two live requirements that admit no common version are a hard error naming both parents, both ranges, and the fix (<code>niko2 get &lt;dep&gt;@&lt;range&gt;</code> with a range both accept, then <code>niko2 lock</code>). Dependency cycles terminate.</p>
+<p><strong>Locked reinstall: <code>get</code> reproduces the pinned tree on a fresh machine.</strong> After every registry <code>get</code>, the CLI installs any lockfile-pinned (registry-source) versions that aren't cached yet — exactly as pinned, from the pin's own <code>source</code>. Strictly additive: nothing is ever downgraded, replaced, or removed. When it installs anything it says so:</p>
+<pre><code>✓ installed locked dependencies: clib 1.1.0</code></pre>
+<p><strong><code>get --update</code> re-resolves the subtree.</strong> After rewriting the top-level pin, the updated package's new <code>[dependencies]</code> ranges are resolved with the same rule as <code>lock</code> and re-pinned — a narrowed dep range re-pins the dep instead of leaving a stale pin behind. Pins outside the updated package's subtree are untouched.</p>
+<h2>Example session</h2>
+<pre><code class="language-bash"># publish two packages to a local dir registry (as in Alpha 19) ...
+$ niko2 publish --registry ./registry        # in greetlib/
+$ niko2 publish --registry ./registry        # in greetapp/ (deps: greetlib ^1.0)
+
+# ... serve it over plain HTTP (any static file host works) ...
+$ python3 -m http.server 8471 --directory ./registry &amp;
+$ export NIKO_REGISTRY=http://127.0.0.1:8471/index.json
+
+# ... and install over HTTP:
+$ niko2 get greetapp
+✓ installed greetapp 1.0.0 → /home/you/.niko/packages/greetapp-1.0.0
+
+$ niko2 lock .
+✓ wrote /home/you/proj/niko.lock
+$ cat niko.lock
+{
+  "packages": {
+    "greetapp": {
+      "version": "1.0.0",
+      "source": "registry:http://127.0.0.1:8471/index.json",
+      "range": "*"
+    },
+    "greetlib": {
+      "version": "1.1.0",
+      "source": "registry:http://127.0.0.1:8471/index.json",
+      "range": "^1.0"
+    }
+  }
+}</code></pre>
+<p>A worked version of this lives in <code>examples/registry-http/</code> (<code>demo.sh</code> does publish → serve → get → lock → run; <code>README.txt</code> explains the static-hosting layout).</p>
+<h2>Known limits</h2>
+<ul>
+<li>**Nested <code>pkg:</code> imports resolve to the newest <em>cached</em> version, not the</li>
+</ul>
+<p>pin.** A <code>pkg:</code> import <em>inside</em> an installed package is resolved by walking up from the cache directory, where there is no <code>niko.lock</code> — so it sees the newest cached version. Direct imports from your project always honor the pin. (Pre-existing Alpha 16 behavior; see <code>niko2/KNOWN_LIMITATIONS.md</code>.)</p>
+<ul>
+<li><strong>No auth, no remote publish.</strong> <code>niko2 publish</code> to an <code>http(s)://</code></li>
+</ul>
+<p>registry is still refused (<code>publishing needs auth, which is not supported yet</code>).</p>
+<ul>
+<li>A bare local directory named exactly like a package is still treated as</li>
+</ul>
+<p>a registry lookup — spell it <code>./dir</code> to force directory handling.</p>
+<h2>Tests</h2>
+<p><code>tests/test_registry.py</code> gains 11 Alpha 24 sections (all hermetic: the registry is published to a local dir, then served over HTTP on 127.0.0.1 with an ephemeral port in an in-process thread; sandboxed <code>NIKO_PKG_CACHE</code>/<code>HOME</code>; no real network; real <code>~/.niko</code> asserted untouched): HTTP get by name/range, sha256 mismatch over HTTP (no partial install, no temp litter), refused-port fails fast + in-process error taxonomy (HTTP status / DNS / refused / timeout), malformed index and missing-<code>packages</code>-table over HTTP, HTTP 404, closure pinning with parent ranges, locked reinstall on a fresh cache, pin-vs-newest-cached resolution (including the nested-import limit, pinned as a test), <code>get --update</code> subtree re-pinning, cycle termination in <code>get</code> <em>and</em> <code>lock</code> (timeout-guarded), conflicting requirements error, and backfill additivity + local-dir/<code>file://</code> regression. Full suite green (26 Niko 1 cases, 16 Niko 2 cases + nikoir round trip, all <code>tests/test_*.py</code>).</p>
+<p>See <code>ALPHA24_DESIGN.md</code> for the design (HTTP behavior, error taxonomy, lockfile shape, pin/conflict/update rules, the static-hosting recipe).</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

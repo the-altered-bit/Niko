@@ -366,3 +366,45 @@ What remains:
   call syntax can invoke — it is dead code and the runner ignores it.
 - **`say` output prints straight through** during tests; there is no
   output-capture assertion API.
+
+## Alpha 28 dogfood notes
+
+Building `examples/ssg` (a static site generator written in Niko) found
+three language bugs, all fixed with regression tests in
+`tests/test_dogfood.py`:
+
+- **Sequential `if`s were parsed as one if/elif chain** (`niko2/parser.py`).
+  `parse_if`'s continuation loop matched any later `if ` line, so in
+  `if a: ...` / `if b: ...` the second body never ran when the first
+  condition was true. Only `otherwise if` / `otherwise:` at the same
+  indent continue an `if` now; a later bare `if` always starts a new
+  statement.
+- **Forward references failed inside imported modules**
+  (`niko2/modules.py`). Only the entry script pre-defined its own
+  top-level names; a module function could not call another defined
+  later in the same file. Every unit now pre-defines its own top-level
+  names before checking.
+- **Closures leaked builtins past shadowing bindings**
+  (`niko2/closures.py`). A nested function reading a builtin-*named*
+  variable bound by an enclosing function (a local `set text to ...`,
+  or an `import ... as text` alias inside a module wrapper) received the
+  builtin instead of the binding. Builtin names bound by an enclosing
+  function are now captured like any other local. The Alpha 10 pinned
+  rule is unchanged: a builtin name in *direct call position* still
+  means the builtin.
+
+What remains (known limits, not bugs):
+
+- **`and` / `or` do not short-circuit.** Both operands always evaluate,
+  on all three backends (Niko 1's `niko.py` short-circuits, so this is a
+  semantic divergence from Niko 1). Guard idioms like
+  `if i < n and item (i + 1) of s is "*":` raise an index error when the
+  guard is false — write the bounds check as a nested `if` instead.
+  Short-circuit evaluation is future work (it needs jump-based codegen
+  in the VM, WASM, and native backends, plus a decision on what `and` /
+  `or` return).
+- **Runtime errors in imported modules report the entry file's path.**
+  Check-time errors are re-tagged with the defining module's path, but
+  a runtime failure inside a module says e.g. `Niko error in main.niko`
+  with the module's line number. The DAP adapter already maps frames
+  to files; `niko2 run`'s error printer does not yet.

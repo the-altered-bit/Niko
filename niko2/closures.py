@@ -38,17 +38,6 @@ class ClosureInfo:
     parent: object | None   # enclosing FunctionDef, or None
 
 
-_BUILTIN_LIKE = None  # filled lazily to avoid a hard import cycle
-
-
-def _builtin_names():
-    global _BUILTIN_LIKE
-    if _BUILTIN_LIKE is None:
-        from .typecheck import BUILTIN_NAMES
-        _BUILTIN_LIKE = set(BUILTIN_NAMES) | {'pi'}
-    return _BUILTIN_LIKE
-
-
 def _pattern_names(p):
     """All names bound by a match pattern (recursive over list/record)."""
     if isinstance(p, (MatchBind, MatchOk, MatchErr, MatchRest)):
@@ -289,18 +278,21 @@ def analyze_closures(tree):
         if p is not None:
             children[id(p)].append(n)
 
-    builtins = _builtin_names()
-
     # external references per function: {name: target FunctionDef}, computed
     # from the ordered reference walk (a name counts when it is not yet bound
     # in this function at that point, so `set n to n + 1` reads the enclosing
-    # `n` and then writes through to the same box).
+    # `n` and then writes through to the same box). Alpha 28: a builtin name
+    # bound by an enclosing function is captured like any other local --
+    # shadowing a builtin inside a function used to leak the builtin into
+    # nested closures instead of the shadowing binding. Names bound nowhere
+    # (module globals and true builtins) resolve without an environment and
+    # are never captured.
     ext = {}
     for n in order:
         refs = {}
         local = set()
         for kind, x in _refs_of_function(n):
-            if x not in local and x not in builtins and x not in refs:
+            if x not in local and x not in refs:
                 m = parents[id(n)]
                 while m is not None and x not in bound[id(m)]:
                     m = parents[id(m)]

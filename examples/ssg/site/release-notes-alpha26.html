@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 26: tooling polish batch — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 26: tooling polish batch</h1>
+<p>Three small, high-value developer-experience wins: REPL <code>:undo</code>, an mtime cache for editor diagnostics, and <code>pkg:</code> completions in import strings. No language changes, no network, no redesigns — all three landed as planned.</p>
+<h2>What changed</h2>
+<p><strong>REPL <code>:undo</code></strong> (<code>niko2/repl.py</code>). Pops the last accepted chunk and rebuilds the session from the remaining ones on a fresh VM + globals, replaying the kept chunks through the normal <code>exec_chunk</code> path with output suppressed. The rebuilt session behaves exactly as if the undone chunk had never been entered:</p>
+<ul>
+<li>Module init-once is preserved: a kept <code>import</code>/<code>use</code> initializes its</li>
+</ul>
+<p>module exactly once within the rebuild, and replay output is suppressed, so each module's top-level <code>say</code> appears exactly once in the visible transcript.</p>
+<ul>
+<li>Echo numbering (<code>__repl_echo_N</code>) and cumulative line numbers are</li>
+</ul>
+<p>re-derived from the kept chunks — a diagnostic after undo says <code>line 2</code>, not <code>line 3</code>.</p>
+<ul>
+<li><code>:undo</code> on an empty session prints <code>Nothing to undo.</code> — a friendly</li>
+</ul>
+<p>message, not an error.</p>
+<ul>
+<li>Limits: no redo; undo rewinds interpreter state only. External side</li>
+</ul>
+<p>effects are replayed, not rewound (a kept chunk that writes a file writes it again; a kept <code>ask</code> chunk re-prompts during the rebuild). Documented in <code>:help</code>, the README REPL section, and <code>niko2/KNOWN_LIMITATIONS.md</code>.</p>
+<p><strong>LSP diagnostics mtime cache</strong> (<code>niko2/lsp.py</code>, <code>_ModuleTreeCache</code>). Alpha 23's module-aware <code>_analyze()</code> re-parsed every module on every <code>didChange</code>; now each module's parsed tree is cached keyed on (mtime, size):</p>
+<ul>
+<li>Invalidation rule: a module counts as changed when its (mtime, size)</li>
+</ul>
+<p>differs, when it can't be stat'ed, or when an unsaved open document overrides it. A changed module invalidates its own entry <strong>and everything downstream</strong> — importers, transitively, using the previous analysis's import/use edges. Over-invalidation is safe; under-invalidation would publish stale diagnostics. (Downstream matters because <code>use</code> merges dependency names into scope and the alias-attr lint reads dependency exports.)</p>
+<ul>
+<li>Cache hits are fed through the existing <code>source_overrides</code></li>
+</ul>
+<p>mechanism, so the module pipeline needed zero changes. Unsaved-override trees are never stored, so a later save can't serve stale in-memory content. The fast path (no top-level import/<code>use</code>) is untouched.</p>
+<ul>
+<li>Measured on a synthetic 51-file / 1140-line project (medians over 20</li>
+</ul>
+<p>runs after warmup): <strong>29.9 ms → 10.5 ms per analysis (2.8× faster)</strong>, with re-parses dropping from 50 to 0 on repeat analyses. Remaining warm cost is <code>check_units</code> + the alias-attr lint, which still run each analysis — the cache deliberately eliminates re-parsing only.</p>
+<p><strong>LSP <code>pkg:</code> completions</strong> (<code>niko2/lsp.py</code>, <code>_complete_pkg_import</code>). When completing inside an import string starting with <code>pkg:</code>, the server now offers installed package names from the local package cache (honoring <code>NIKO_PKG_CACHE</code>); after <code>pkg:&lt;name&gt;/</code> it offers <code>.niko</code> file paths inside that package (nested included, e.g. <code>sub/util.niko</code>), resolved exactly as at compile time (lockfile pin wins, else newest cached). Plain non-<code>pkg:</code> strings are untouched; an empty/unresolvable cache yields no completions, never an error; the network is never consulted.</p>
+<h2>Verification</h2>
+<ul>
+<li><code>python3 tests/test_repl.py</code> → 30 checks green, including 9 new undo</li>
+</ul>
+<p>checks (undo after set/to/use/import chunks, undo-empty message, multi-undo, line-number re-derivation, echo numbering).</p>
+<ul>
+<li><code>python3 tests/test_lsp.py</code> → all sections green, including new mtime</li>
+</ul>
+<p>cache checks (unchanged tree → zero re-parses; changed leaf invalidates downstream importers only; unsaved override wins) and <code>pkg:</code> completion checks (package names, nested paths, pin-aware resolution, empty cache → none, non-pkg strings unaffected).</p>
+<ul>
+<li>Full suite: 40 pytest + 26 Niko 1 + 16 Niko 2 cases + nikoir round</li>
+</ul>
+<p>trip, all green.</p>
+<h2>Docs</h2>
+<ul>
+<li><code>ALPHA26_DESIGN.md</code> (this sprint's design + "As built", including the</li>
+</ul>
+<p>measured numbers), <code>NIKO_AI_HANDOFF.md</code>, <code>NEXT_STEPS.md</code> (Alpha 26 complete), <code>niko2/KNOWN_LIMITATIONS.md</code> (REPL: <code>:undo</code> exists, still no redo), <code>:help</code> text.</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

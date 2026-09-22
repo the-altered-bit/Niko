@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 27: niko2 test + assert — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 27: <code>niko2 test</code> + <code>assert</code></h1>
+<p>Niko 2 had a full toolchain but no way to test Niko code itself. Alpha 27 closes that gap with a test runner and one new statement.</p>
+<h2>What changed</h2>
+<p><strong><code>assert</code> statement</strong> (new syntax — the only syntax added this sprint):</p>
+<pre><code class="language-niko">assert 1 + 1 == 2
+assert text.length(name) &gt; 0, "name must not be empty"</code></pre>
+<ul>
+<li>The condition must be boolean, the message (optional) must be text —</li>
+</ul>
+<p>both checked by the typechecker with line numbers.</p>
+<ul>
+<li>On failure it raises a Niko error naming the expression's source text</li>
+</ul>
+<p>and the line: <code>Line 5: Assertion failed: "2 * 2 == 5" is not true: maths broke</code>. The message expression is evaluated lazily, only on the failure path (like Python's <code>assert</code>).</p>
+<ul>
+<li>Works on the VM and WASM backends (WASM panics with the same</li>
+</ul>
+<p>message). The native backend refuses it with a clean compile error (<code>assert is not supported on the native backend</code>) — fail loudly, never miscompile. The formatter round-trips it.</p>
+<ul>
+<li><code>assert</code> was chosen as a statement (not a builtin) so it reads like</li>
+</ul>
+<p>the rest of the language (<code>say</code>, <code>ask</code>) and so the failure can carry the source line. A grep confirmed no existing code used <code>assert</code> as an identifier, so nothing breaks.</p>
+<p><strong><code>niko2 test [dir]</code></strong> (new command):</p>
+<pre><code class="language-console">$ niko2 test
+PASS test_add (math_test.niko)
+PASS test_mul (math_test.niko)
+FAIL test_add_zero (math_test.niko)
+  Niko error in math_test.niko: Line 4: Assertion failed: "math.add(0, 5) == 5" is not true.
+1 passed, 2 failed</code></pre>
+<ul>
+<li><strong>Discovery</strong>: recursively finds <code>*_test.niko</code> and <code>test_*.niko</code></li>
+</ul>
+<p>(default: current directory; a single <code>.niko</code> file runs just that file). No config file. Hidden directories are skipped.</p>
+<ul>
+<li><strong>Test model</strong>: every top-level <code>to test_&lt;name&gt;:</code> with no parameters</li>
+</ul>
+<p>is a test. (<code>to test &lt;name&gt;:</code> — the space form — parses as a function literally named <code>'test &lt;name&gt;'</code>, which no call syntax can invoke, so it is dead code and is not collected.)</p>
+<ul>
+<li><strong>Isolation</strong>: each test compiles <code>file source + "\ntest_name()"</code></li>
+</ul>
+<p>through the normal module pipeline and runs it on a brand-new VM — fresh globals, fresh module, every time. One test's <code>set</code> can't leak into another. <code>import</code>/<code>use</code> of the code under test work exactly like <code>niko2 run</code>.</p>
+<ul>
+<li><strong>Failures</strong>: a raised Niko error or a failed <code>assert</code>. A test file</li>
+</ul>
+<p>that doesn't compile is one reported failure, never a crash.</p>
+<ul>
+<li><strong>Reporting</strong>: plain greppable <code>PASS</code>/<code>FAIL</code> lines, failures show the</li>
+</ul>
+<p>error with file:line (same format as <code>niko2 run</code>), summary <code>N passed, M failed</code>, exit code 0 iff all pass. No tests found → a message, exit 0. <code>say</code> output prints straight through.</p>
+<ul>
+<li><strong>VM only</strong>: the runner is a dev tool and the VM is the reference</li>
+</ul>
+<p>semantics; WASM/native are compile targets and per-test toolchain spin-up would be slow and couldn't easily invoke individual test functions.</p>
+<h2>Verification</h2>
+<ul>
+<li><code>tests/test_assert.py</code> (new): pass/fail/message/lazy-message,</li>
+</ul>
+<p>non-boolean condition and non-text message are type errors, assert in functions, VM + WASM differential on the failure message.</p>
+<ul>
+<li><code>tests/test_test_runner.py</code> (new, 22 tests): discovery (nested dirs,</li>
+</ul>
+<p>both filename conventions, non-test files ignored), isolation (globals don't leak), error-raising test → failure with file:line, uncompilable file → clean failure entry, summary counts + exit codes, no-tests-found, <code>assert</code> with and without message through the real runner.</p>
+<ul>
+<li><code>examples/testing/</code> (new): <code>math.niko</code> + <code>math_test.niko</code> +</li>
+</ul>
+<p><code>README.txt</code> — a worked example verified on the real CLI.</p>
+<ul>
+<li>Full suite green: 26 Niko 1, 16 Niko 2 + nikoir round trip, all</li>
+</ul>
+<p><code>tests/test_*.py</code>.</p>
+<h2>Limits (future work, not half-built)</h2>
+<p>No fixtures, no mocks, no coverage. <code>assert</code> on the native backend is a clean compile error. The runner is VM-only. Functions return <code>nothing</code> unless they <code>give back</code> a value — test authors will hit this; it's in the example README.</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

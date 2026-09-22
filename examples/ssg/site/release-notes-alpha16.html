@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 16 release notes (2026-09-22) — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 16 release notes (2026-09-22)</h1>
+<p><strong>The package manager arrives.</strong> Niko 2 programs can now share reusable libraries through packages. Publish a package as a folder (or a git repo) with a <code>niko.toml</code> manifest; install it with one command; import it with the <code>pkg:</code> prefix. Versions are pinned in <code>niko.lock</code> so builds stay reproducible. There is no registry server — <code>niko2 get</code> installs from a local directory or a git URL, and everything else (compile, run, check, WASM/native, debug, LSP) resolves packages <strong>offline</strong> from the local cache.</p>
+<pre><code class="language-niko"># niko.toml (the package being published)
+[package]
+name = "hello-pkg"
+version = "1.0.0"
+description = "A tiny example package."</code></pre>
+<pre><code class="language-console">$ niko2 get examples/packages/hello-pkg
+✓ installed hello-pkg 1.0.0 → /home/casper/.niko/packages/hello-pkg-1.0.0
+
+$ niko2 run examples/packages/hello-app/main.niko
+Hello, Casper, from a Niko package!</code></pre>
+<pre><code class="language-niko"># the consumer program
+import "pkg:hello-pkg/greet.niko" as greet
+say greet.greet("Casper")</code></pre>
+<p>Try it yourself: <code>examples/packages/</code> holds a worked example (a published-style package plus a consumer), with step-by-step instructions in <code>examples/packages/README.txt</code>.</p>
+<h2>How it works</h2>
+<ul>
+<li><strong><code>niko2 get &lt;directory|git-url&gt;</code></strong> is the only command that ever touches</li>
+</ul>
+<p>the network (a shallow <code>git clone --depth 1</code>; the <code>.git</code> metadata is stripped). Installing from a directory needs no network at all.</p>
+<ul>
+<li>Packages live in <strong><code>~/.niko/packages/&lt;name&gt;-&lt;version&gt;/</code></strong> (override with</li>
+</ul>
+<p><code>NIKO_PKG_CACHE</code>). Each cached copy carries a <code>.niko-source.json</code> provenance record so <code>niko2 lock</code> can record where it came from.</p>
+<ul>
+<li><strong>No version in the import string.</strong> <code>import "pkg:&lt;name&gt;/path/file.niko"</code></li>
+</ul>
+<p>takes no version — versions live in the lockfile. Resolution: the pinned version from the nearest enclosing <code>niko.lock</code> wins; with no lockfile, the newest cached version is used; nothing cached gives the friendly <code>unknown package "foo" — run 'niko2 get &lt;source&gt;' to install it first</code>.</p>
+<ul>
+<li><strong><code>niko2 lock</code> never silently upgrades.</strong> Re-locking keeps a previously</li>
+</ul>
+<p>pinned version that is still installed; it pins the newest cached version only when there's no pin yet, and errors (naming <code>niko2 get</code>) if an imported package isn't installed at all.</p>
+<ul>
+<li><strong>Manifest rules:</strong> the <code>[package]</code> table is canonical (<code>name</code>, <code>version</code>,</li>
+</ul>
+<p><code>entry</code> defaulting to <code>main.niko</code>, optional <code>description</code>); Alpha 4-era flat keys still work (<code>[package]</code> wins if both appear); unknown fields are ignored for forward compatibility. Names must match <code>^[A-Za-z][A-Za-z0-9_-]*$</code>; versions are strict <code>X.Y.Z</code> (no leading zeros). <code>niko2 init</code> now writes the canonical form.</p>
+<ul>
+<li><strong>Offline guarantee:</strong> <code>import "pkg:…"</code> never hits the network. A</li>
+</ul>
+<p>pinned-but-evicted package (lock says 9.9.9, only 1.0.0 cached) errors explicitly instead of resolving the wrong code.</p>
+<ul>
+<li><code>import "pkg:…"</code> must name a <code>.niko</code> file, and <code>..</code> cannot escape the</li>
+</ul>
+<p>cached package directory. <code>import "stdlib/text.niko"</code> resolves exactly as before — packages don't collide with the bundled stdlib.</p>
+<p><strong>Deliberate limits (for now):</strong> no registry server, no <code>publish</code> command, no version-range solving, no <code>niko</code> command alias (the repo already has a Niko 1 <code>niko.py</code>; <code>niko2</code> keeps the two unambiguous). See <code>ALPHA16_DESIGN.md</code> and <code>niko2/KNOWN_LIMITATIONS.md</code>.</p>
+<p><strong>Housekeeping:</strong> <code>niko2 get &lt;src&gt; --force</code> reinstalls over an already-cached package (plain <code>niko2 get</code> is idempotent — second run is a no-op message). Flags must come <strong>after</strong> the source (<code>niko2 get &lt;src&gt; --force</code>, not <code>niko2 get --force &lt;src&gt;</code>) — a pre-existing argparse quirk shared with other commands.</p>
+<p>Full suite green: 26 Niko 1 cases, 15 Niko 2 cases + nikoir round trip, all <code>tests/test_*.py</code>.</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

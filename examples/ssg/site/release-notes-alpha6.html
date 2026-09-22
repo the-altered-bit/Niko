@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 Alpha 6 — release notes — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 Alpha 6 — release notes</h1>
+<p>Alpha 6 completes the language core the roadmap set out: <strong>real generic types</strong>, an <strong>option/result error model</strong>, and <strong>pattern matching</strong>. The package dependency graph (<code>niko2 deps</code>) and lock file (<code>niko2 lock</code>) from the roadmap already shipped earlier. Everything below is implemented, typechecked, compiled to bytecode, and covered by tests.</p>
+<h2>WIP1 — <code>list&lt;T&gt;</code> generics are checked for real</h2>
+<ul>
+<li><strong>List literals infer element types.</strong> <code>[1, 2, 3]</code> is <code>list&lt;number&gt;</code>,</li>
+</ul>
+<p><code>[["a"]]</code> is <code>list&lt;list&lt;text&gt;&gt;</code>; heterogeneous literals (<code>[1, "a"]</code>) stay legal Niko and infer <code>list&lt;any&gt;</code>; <code>[]</code> stays plain <code>list</code>.</p>
+<ul>
+<li><strong>Annotations are enforced.</strong> A list literal assigned to a <code>list&lt;T&gt;</code></li>
+</ul>
+<p>variable is checked element by element: <code>set xs: list&lt;number&gt; to ["a"]</code> → <code>cannot assign text to list&lt;number&gt; variable "xs"</code>.</p>
+<ul>
+<li><strong><code>put</code> checks the value</strong> against the list's element type</li>
+</ul>
+<p>(<code>cannot put text in list&lt;number&gt;</code>); <strong><code>X[i]</code> and <code>item_of(i, X)</code> yield the element type</strong> (so <code>set s: text to nums[0]</code> fails when <code>nums</code> is <code>list&lt;number&gt;</code>); <strong><code>for each x in XS</code> types <code>x</code></strong> as the element type.</p>
+<ul>
+<li><strong>Nested annotations parse:</strong> the <code>set</code> regex now allows nested angle</li>
+</ul>
+<p>brackets, so <code>set grid: list&lt;list&lt;number&gt;&gt; to [[1, 2], [3]]</code> works (previously a parse error).</p>
+<ul>
+<li>Tests: <code>tests/niko2_cases/generics.niko</code> (+<code>.out</code>) extended with</li>
+</ul>
+<p>element-type, <code>put</code>, indexing, nested, and heterogeneous cases; <code>tests/test_generics.py</code> asserts six rejection cases (message + exit 1) and three still-legal cases.</p>
+<ul>
+<li>Still future: generic-aware builtin <em>return</em> types (<code>sorted</code>, <code>unique</code>,</li>
+</ul>
+<p>… still return <code>any</code>), call-argument checking against parameter annotations, <code>map&lt;K,V&gt;</code> value-type inference.</p>
+<h2>WIP2 — option/result error model</h2>
+<p>Failure is now a value, not an exception. Two types:</p>
+<ul>
+<li><code>option&lt;T&gt;</code> — a <code>T</code> or <code>nothing</code>. A plain <code>T</code> is a valid <code>option&lt;T&gt;</code>,</li>
+</ul>
+<p>so <code>set x: option&lt;number&gt; to 5</code> and <code>set x: option&lt;number&gt; to nothing</code> both check; <code>set x: option&lt;number&gt; to "a"</code> is rejected.</p>
+<ul>
+<li><code>result&lt;T&gt;</code> — <code>ok(value)</code> or <code>error(message)</code>. Niko errors are already</li>
+</ul>
+<p>plain-English text, so the error side is always text.</p>
+<p>New builtins (<code>use "result"</code> group in the stdlib listing):</p>
+<p>| helper | meaning | |---|---| | <code>ok(v)</code> / <code>error(msg)</code> | build a result | | <code>is_ok(r)</code> / <code>is_error(r)</code> | test it | | <code>unwrap(r)</code> | the value, or fail with the error message itself | | <code>unwrap_or(r, default)</code> | the value, or <code>default</code> (also unwraps options: <code>unwrap_or(nothing, 0)</code> → <code>0</code>) | | <code>error_message(r)</code> | the message text of an error result | | <code>try_read_file(name)</code> | <code>ok(text)</code> or <code>error("I couldn't find the file …")</code> | | <code>try_number(text)</code> | <code>ok(number)</code> or <code>error("I can't turn … into a number.")</code> |</p>
+<p>The typechecker infers <code>ok(42)</code> as <code>result&lt;number&gt;</code>, types <code>unwrap</code> / <code>unwrap_or</code> as <code>T</code> for a <code>result&lt;T&gt;</code>, and rejects assigning a bare value to a <code>result&lt;T&gt;</code> variable (<code>cannot assign number to result&lt;number&gt;</code>). <code>say ok(42)</code> prints <code>ok(42)</code>; <code>say error("boom")</code> prints <code>error("boom")</code>.</p>
+<p>The raising builtins (<code>read_file</code>, <code>number</code>, …) are unchanged — the <code>try_*</code> variants are the opt-in value-based path.</p>
+<h2>WIP3 — pattern matching</h2>
+<p>The <code>match</code> statement (the old <code>match is reserved for Niko 2.1</code> stub is gone — it shipped early):</p>
+<pre><code>match try_number(ask "age?"):
+    when ok n:
+        say "you are " + text(n)
+    when error msg:
+        say "that wasn't a number: " + msg
+
+match day:
+    when "sat", "sun":
+        say "weekend"
+    when nothing:
+        say "no day set"
+    when d:
+        say "weekday: " + d
+    otherwise:
+        say "unreachable, but allowed"</code></pre>
+<ul>
+<li>Patterns: literals (<code>1</code>, <code>"quit"</code>, <code>yes</code>, <code>nothing</code>), <code>ok name</code> /</li>
+</ul>
+<p><code>error name</code> destructuring (name binds the value / the message text), bare-name bindings (<code>when d:</code>), comma-separated alternatives (<code>when "sat", "sun":</code>). First match wins.</p>
+<ul>
+<li><code>otherwise:</code> is optional; if nothing matches, execution simply</li>
+</ul>
+<p>continues after the <code>match</code>.</p>
+<ul>
+<li>The checker types bindings (<code>ok n</code> on a <code>result&lt;number&gt;</code> gives <code>n</code></li>
+</ul>
+<p>the type <code>number</code>) and rejects <code>ok</code>/<code>error</code> patterns against a statically known non-result (<code>cannot match "ok" against number</code>).</p>
+<ul>
+<li>The compiler desugars <code>match</code> to the existing jump opcodes plus the</li>
+</ul>
+<p><code>is_ok</code> / <code>unwrap</code> builtins — the subject is evaluated once, no new VM opcodes were needed.</p>
+<ul>
+<li><code>niko2 format</code> round-trips <code>match</code> blocks.</li>
+</ul>
+<p>Tests: <code>tests/niko2_cases/results.niko</code> (+<code>.out</code>), <code>tests/niko2_cases/match.niko</code> (+<code>.out</code>), <code>tests/test_results_match.py</code> (five checker rejections, six still-legal cases, <code>unwrap</code> runtime messages, hermetic <code>try_read_file</code> round trip), match cases added to <code>tests/test_formatter.py</code>.</p>
+<h2>Still future (Alpha 7+)</h2>
+<ul>
+<li>Match guards (<code>when n if n &gt; 0:</code>), list/record patterns, <code>match</code> as an</li>
+</ul>
+<p>expression.</p>
+<ul>
+<li><code>map&lt;K,V&gt;</code> generics, generic builtin return types.</li>
+<li>Alpha 7: language server, VS Code extension, debugger protocol.</li>
+<li>Alpha 8: WASM backend. Alpha 9: native backend.</li>
+</ul>
+<h2>Validation</h2>
+<ul>
+<li>12 Niko 2 cases green, 26 Niko 1 cases green (engines behavior-identical).</li>
+<li><code>test_diagnostics</code>, <code>test_formatter</code>, <code>test_generics</code>, <code>test_stdlib</code>,</li>
+</ul>
+<p><code>test_results_match</code>, <code>test_project_deps</code> all pass.</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

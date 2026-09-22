@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 23 release notes (2026-09-22) — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 23 release notes (2026-09-22)</h1>
+<p><strong>The red squiggles finally understand multi-file programs.</strong> Up to now the editor diagnostics (the thing that flags errors as you type) only looked at the file you had open: <code>import "lib/math.niko" as m</code> followed by <code>m.add(1, 2)</code> got a phantom "unknown name" squiggle even though the program compiled and ran fine. Alpha 23 makes the language server analyze the whole module graph — imports and <code>use</code>s included — so diagnostics match what <code>niko2 run</code> actually does. Along the way this alpha also fixes the debugger's same-line breakpoint re-fire, a formatter quote bug on <code>use</code>, and makes <code>use</code> inside a function an error instead of a silent no-op.</p>
+<h2>What changed</h2>
+<ul>
+<li><strong>Module-aware editor diagnostics.</strong> Opening a file with <code>import</code></li>
+</ul>
+<p>or <code>use</code> statements now runs the same graph → per-module check that the compiler uses. Imported names and <code>use</code>-merged names no longer get phantom <code>unknown name</code> squiggles; <code>m.nope</code> (an attribute the module doesn't export) is flagged on the attribute's line; an unresolvable import produces exactly one diagnostic on the import line (no cascade); type errors are attributed to the right file and line (the squiggle lands in the module file, not your entry). Single-file documents keep the old behavior — no disk reads at all. Unsaved module buffers override the on-disk version, so what you see is what you get even before saving.</p>
+<ul>
+<li><strong>Debugger: a breakpoint on a call line no longer re-fires.</strong> The</li>
+</ul>
+<p>known quirk where stepping into a call and continuing stopped <em>again</em> on the same line (the post-call store carries the call's line number) is fixed. Loops still re-fire correctly — one stop per iteration — because loop iterations re-execute the same instructions.</p>
+<ul>
+<li><strong>Formatter:</strong> <code>use "a.niko"</code> no longer renders as <code>use '"a.niko"'</code>.</li>
+<li><strong><code>use</code> inside a function is now an error.</strong> <code>use</code> may only appear at</li>
+</ul>
+<p>the top of a file (like <code>import</code>); putting one inside a <code>to</code> block now says <code>'use' is only allowed at the top of a file, not inside a function</code> with a caret, instead of being silently ignored.</p>
+<h2>What it feels like in the editor</h2>
+<p>Open <code>main.niko</code> that does <code>import "lib/util.niko" as util</code> and calls <code>util.shout("hi")</code> — no more red squiggles on <code>util.shout</code>. Rename a function in <code>util.niko</code> without saving: the diagnostics follow the unsaved buffer, so the error points at the right place immediately. Debug a call line with the breakpoint armed: step in, step out, keep going — the debugger stops where the breakpoint is, once, not twice.</p>
+<h2>Known limits (not fixed this alpha)</h2>
+<ul>
+<li>Editor diagnostics with modules parse + typecheck every reachable</li>
+</ul>
+<p>module on each edit: single-file documents do no disk IO (unchanged), but a multi-file program re-reads its modules per <code>didChange</code>. Caching by mtime is future work (see <code>ALPHA23_DESIGN.md</code>).</p>
+<ul>
+<li>Diagnostics are still line-oriented: hover and go-to-definition</li>
+</ul>
+<p>resolve to the nearest sensible line, not an exact range.</p>
+<h2>Tests</h2>
+<ul>
+<li><code>tests/test_lsp.py</code>: 8 new Alpha 23 checks over a real multi-file</li>
+</ul>
+<p>LSP session — import aliases and <code>use</code>d names produce no phantoms; <code>m.nope</code> → exactly 1 diagnostic on the attribute's line; missing import → exactly 1 diagnostic on the import line, no cascade; entry type error surfaces; a module-file type error is attributed to that file's URI + line; fixing the module's unsaved text clears its diagnostic; no-op entry edits prove the in-memory override is used (no stale module diagnostics). The Alpha 17 case now expects the 1 <code>cannot find module</code> diagnostic (was <code>[]</code>), and the Alpha 22 case expects exactly 1 <code>cannot find module</code> instead of the old phantom <code>unknown name</code> assertion.</p>
+<ul>
+<li><code>tests/test_dap.py</code>: new <code>test_no_breakpoint_refire_on_call_line</code> —</li>
+</ul>
+<p>breakpoint on a call line, step in, continue → the program runs to <code>terminated</code> with no second stop, output correct. The old "clear the breakpoint before stepOut" workaround in <code>test_use_under_debugger</code> is removed: keeping the breakpoint armed through step-out and asserting reason <code>step</code> is the direct proof the re-fire is gone.</p>
+<ul>
+<li><code>tests/test_formatter.py</code>: <code>use "a.niko"</code> / <code>use 'b.niko'</code> format to</li>
+</ul>
+<p><code>use "a.niko"</code> / <code>use "b.niko"</code> — no doubled quotes, and the output re-parses.</p>
+<ul>
+<li><code>tests/test_use_pipeline.py</code>: <code>use</code>-in-function now errors at the</li>
+</ul>
+<p>checker level (line 2) and at the CLI level (exit ≠ 0, message + caret).</p>
+<h2>Docs</h2>
+<ul>
+<li><code>ALPHA23_DESIGN.md</code> (new, with "As built"), <code>NIKO_AI_HANDOFF.md</code></li>
+</ul>
+<p>(item 17), <code>NEXT_STEPS.md</code> (Alpha 23 complete), <code>niko2/KNOWN_LIMITATIONS.md</code> (fixed bullets removed).</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>

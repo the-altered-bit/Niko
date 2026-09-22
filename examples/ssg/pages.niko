@@ -1,0 +1,31 @@
+# pages.niko — page-level helpers for the static site generator.
+# A "page" is a record: {"source": ..., "slug": ..., "title": ..., "html": ...}.
+
+import "stdlib/text.niko" as text
+
+to slug_for with path:
+    # "RELEASE_NOTES_ALPHA10.md" -> "release-notes-alpha10".
+    set parts to split(path, "/")
+    set n to length of parts
+    set base to item n of parts
+    set bits to split(base, ".md")
+    set stem to item 1 of bits
+    give back text.slugify(stem)
+
+to build_nav with pages:
+    # A <nav> linking every page; the same nav goes on all pages.
+    set out to "<nav>\n"
+    set out to out + "  <a href=\"index.html\">Home</a>\n"
+    for each p in pages:
+        set out to out + "  <a href=\"" + p["slug"] + ".html\">" + p["nav_title"] + "</a>\n"
+    set out to out + "</nav>\n"
+    give back out
+
+to build_index_content with pages:
+    set out to "<h1>Niko 2.0 documentation</h1>\n"
+    set out to out + "<p>Generated from the Markdown sources in the Niko 2.0 repository by <code>niko-ssg</code>, a static site generator written in Niko itself.</p>\n"
+    set out to out + "<h2>Pages</h2>\n<ul>\n"
+    for each p in pages:
+        set out to out + "<li><a href=\"" + p["slug"] + ".html\">" + p["nav_title"] + "</a></li>\n"
+    set out to out + "</ul>\n"
+    give back out

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niko 2.0 — Alpha 9 Release Notes (2026-09-21) — Niko 2.0 docs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<div class="brand"><a href="index.html">Niko 2.0 docs</a></div>
+<nav>
+  <a href="index.html">Home</a>
+  <a href="stdlib.html">Niko 2 Standard Library</a>
+  <a href="niko-ai-brief.html">Niko: briefing for an AI (learning it, teaching it, or developing it)</a>
+  <a href="release-notes-alpha10.html">Niko 2.0 — Alpha 10 Release Notes (2026-09-21)</a>
+  <a href="release-notes-alpha11.html">Niko 2.0 — Alpha 11 release notes</a>
+  <a href="release-notes-alpha12.html">Niko 2.0 — Alpha 12 release notes</a>
+  <a href="release-notes-alpha13.html">Niko 2.0 — Alpha 13 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha14.html">Niko 2.0 — Alpha 14 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha15.html">Niko 2.0 — Alpha 15 release notes (2026-09-21)</a>
+  <a href="release-notes-alpha16.html">Niko 2.0 — Alpha 16 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha17.html">Niko 2.0 — Alpha 17 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha18.html">Niko 2.0 — Alpha 18 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha19.html">Niko 2.0 — Alpha 19 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha20.html">Niko 2.0 — Alpha 20 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha21.html">Niko 2.0 — Alpha 21 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha22.html">Niko 2.0 — Alpha 22 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha23.html">Niko 2.0 — Alpha 23 release notes (2026-09-22)</a>
+  <a href="release-notes-alpha24.html">Niko 2.0 — Alpha 24: Registry hardening (HTTP support + pinned transitive closure)</a>
+  <a href="release-notes-alpha25.html">Niko 2.0 — Alpha 25: VS Code extension refresh + publish prep</a>
+  <a href="release-notes-alpha26.html">Niko 2.0 — Alpha 26: tooling polish batch</a>
+  <a href="release-notes-alpha27.html">Niko 2.0 — Alpha 27: niko2 test + assert</a>
+  <a href="release-notes-alpha4.html">Niko 2.0 Alpha 4</a>
+  <a href="release-notes-alpha5-wip.html">Niko 2.0 Alpha 5 (work in progress)</a>
+  <a href="release-notes-alpha6.html">Niko 2.0 Alpha 6 — release notes</a>
+  <a href="release-notes-alpha7.html">Niko 2.0 Alpha 7 — release notes</a>
+  <a href="release-notes-alpha8.html">Niko 2.0 — Alpha 8 Release Notes</a>
+  <a href="release-notes-alpha9.html">Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</a>
+</nav>
+
+</header>
+<main>
+<h1>Niko 2.0 — Alpha 9 Release Notes (2026-09-21)</h1>
+<h2>Native backend: <code>niko2 native</code></h2>
+<p>Niko programs now compile to real native executables. The pipeline is <code>.niko</code> → checked AST → C source → system C compiler → executable:</p>
+<pre><code>niko2 native hello.niko -o hello        # build
+niko2 native hello.niko --run           # build + run
+niko2 native hello.niko --emit-c        # keep the generated hello.c</code></pre>
+<h2>How it works</h2>
+<ul>
+<li><code>niko2/backends/native.py</code> (<code>NativeBackend</code>, registered in</li>
+</ul>
+<p><code>get_backend</code>/<code>BACKENDS</code>): AST → C codegen, then invokes <code>cc -O2 -I&lt;backends&gt; prog.c niko_runtime.c -lm</code> in a temp dir.</p>
+<ul>
+<li><code>niko2/backends/niko_runtime.c</code> / <code>.h</code>: the runtime — same boxed value</li>
+</ul>
+<p>model as the WASM backend (heap <code>NVal*</code>, tags 0–6, f64 numbers, text as bytes+len), all builtins implemented in C against libc.</p>
+<ul>
+<li>Design notes: <code>niko2/backends/NATIVE_DESIGN.md</code>.</li>
+</ul>
+<h2>Parity with the VM</h2>
+<ul>
+<li>14 differential programs (arithmetic, text ops, comparisons, control</li>
+</ul>
+<p>flow, lists, records, functions/recursion, match, results, builtins) produce <strong>byte-identical output</strong> to the VM — <code>tests/test_native.py</code>.</p>
+<ul>
+<li>Number formatting matches the VM exactly (shortest round-trip, integral</li>
+</ul>
+<p>doubles print without <code>.0</code>, records print keys unquoted, errors print <code>error("msg")</code>).</p>
+<h2>Native extras (beyond what WASM supports)</h2>
+<ul>
+<li><code>ask</code> reads from stdin directly — no host shim needed.</li>
+<li>File builtins work: <code>read_file</code>, <code>write_file</code>, <code>append_file</code>,</li>
+</ul>
+<p><code>read_lines</code>, <code>file_exists</code>, <code>try_read_file</code> (cwd-relative).</p>
+<h2>Limits (see <code>niko2/KNOWN_LIMITATIONS.md</code>)</h2>
+<ul>
+<li>No <code>use</code> imports, no method-call syntax, no first-class function values.</li>
+<li>No closures over enclosing function locals — a clear <code>CompileError</code></li>
+</ul>
+<p>names the variable and line (same as WASM).</p>
+<ul>
+<li>The VM's constant-pool dedup bug (yes/no vs 1/0) is <em>not</em> mirrored;</li>
+</ul>
+<p>native output is the correct one.</p>
+<ul>
+<li>Needs <code>cc</code>/<code>gcc</code>/<code>clang</code> on PATH. Runtime errors print</li>
+</ul>
+<p><code>Niko error at line N: msg</code> to stderr, exit 1 (VM prints its own format, exit 0).</p>
+<h2>Tests</h2>
+<ul>
+<li><code>tests/test_native.py</code>: differential vs VM (14 cases), closure</li>
+</ul>
+<p>rejection, native-only file-I/O + <code>ask</code> tests. Skips cleanly with no C compiler on PATH.</p>
+<ul>
+<li>Full suite green: 26 Niko 1 cases, 12 Niko 2 cases + <code>nikoir</code> round trip,</li>
+</ul>
+<p>all <code>tests/test_*.py</code> (incl. WASM, LSP, DAP).</p>
+
+</main>
+<footer>
+<p>Generated by <code>niko-ssg</code> — a static site generator written in the Niko language itself.</p>
+</footer>
+</body>
+</html>
