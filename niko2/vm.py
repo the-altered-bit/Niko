@@ -44,11 +44,15 @@ def _try_number(x):
     except NikoRuntimeError as e: return NikoResult(False,message=str(e))
 
 class Frame:
-    def __init__(self,code,env=None,name='<main>',constants=None,globals=None):
+    def __init__(self,code,env=None,name='<main>',constants=None,globals=None,qualname=None):
         self.code=code; self.constants=constants or []; self.env={} if env is None else env; self.stack=[]; self.ip=0; self.name=name; self.iter_stack=[]
         # Alpha 10: the module env, for names that are neither locals nor
         # captured cells (module globals stay one shared namespace).
         self.globals=self.env if globals is None else globals
+        # Alpha 18: the function's unique qualname ("outer$inner" for nested
+        # defs). The debugger uses it to map a frame back to its source
+        # file when several modules are desugared into one program.
+        self.qualname=name if qualname is None else qualname
 
 class Cell:
     """A shared box for a captured variable (Alpha 10 closures).
@@ -72,7 +76,12 @@ class VMFunction:
         vm=VM(); vm.constants=self.code.constants or []; return vm.execute_code(self.code.code,env,self.code.name,vm.constants,self.globals_env)
 
 class VM:
-    def __init__(self): self.output=[]; self.trace_fn=None
+    def __init__(self):
+        self.output=[]; self.trace_fn=None
+        # Alpha 18: how the INPUT opcode (the `ask` statement) reads a line.
+        # Defaults to console stdin; the debugger overrides it so `ask`
+        # works while a debug session owns the process's stdin.
+        self.input_fn=input
     def builtin(self,name):
         b={'text':lambda x:str(x),'number':number,'length':len,'item_of':lambda i,x:x[int(i)-1],
         'upper':lambda x:str(x).upper(),'lower':lambda x:str(x).lower(),'trim':lambda x:str(x).strip(),
@@ -171,14 +180,14 @@ class VM:
                     prompt=f.stack.pop()
                     if a:  # ask number: keep asking until a number parses
                         while True:
-                            t=input(fmt(prompt)).strip()
+                            t=self.input_fn(fmt(prompt)).strip()
                             try: v=int(t)
                             except ValueError:
                                 try: v=float(t)
                                 except ValueError: print('Please type a number.'); continue
                             f.stack.append(v); break
                     else:
-                        f.stack.append(input(fmt(prompt)))
+                        f.stack.append(self.input_fn(fmt(prompt)))
                 elif op=='ATTR':
                     obj=f.stack.pop(); f.stack.append(obj[a] if isinstance(obj,dict) else getattr(obj,a))
                 elif op=='CALL_BUILTIN':
@@ -190,7 +199,7 @@ class VM:
                     args=[f.stack.pop() for _ in range(a)][::-1]; fn=f.stack.pop()
                     if isinstance(fn,VMFunction):
                         if len(args)!=len(fn.code.params): raise NikoRuntimeError(f'{fn.code.name} expected {len(fn.code.params)} arguments, got {len(args)}.')
-                        env2=dict(fn.cells); env2.update(zip(fn.code.params,args)); frames.append(Frame(fn.code.code,env2,fn.code.name,fn.code.constants or [],fn.globals_env))
+                        env2=dict(fn.cells); env2.update(zip(fn.code.params,args)); frames.append(Frame(fn.code.code,env2,fn.code.name,fn.code.constants or [],fn.globals_env,fn.code.qualname))
                     elif callable(fn): f.stack.append(fn(*args))
                     else: raise NikoRuntimeError(f"I can't call {fmt(fn)} as a function.")
                 elif op=='RETURN':

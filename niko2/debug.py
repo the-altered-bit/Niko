@@ -9,14 +9,25 @@ blocks the VM thread until the client resumes it. The DAP adapter
 Pause granularity is one source line: the hook only considers pausing
 when execution arrives at a new (frame, line) pair, so a line that
 compiles to several instructions pauses once, not once per instruction.
+
+Multi-file programs (Alpha 18) go through the module pipeline
+(`niko2/modules.py`) before compiling: every reachable module is
+typechecked and the graph is desugared to one Program whose per-module
+wrapper functions (`__import$mK`, nested defs `__import$mK$name`) keep
+their original line numbers. A frame's qualname therefore identifies its
+source file by prefix, so breakpoints, stepping, and stack traces follow
+execution across files at one-line granularity.
+
+`ask` (Alpha 18) works under the debugger: the VM reads input through
+`vm.input_fn`, which the Debugger routes to its `on_input` callback
+(prompt -> str, called on the VM thread). When no callback is set it
+falls back to console stdin.
 """
 import io
 import threading
 from contextlib import redirect_stdout
-from pathlib import Path
 
-from .parser import parse
-from .typecheck import check
+from .typecheck import Checker, TypeErrorNiko
 from .compiler import compile_ast
 from .vm import VM, NikoRuntimeError, VMFunction, Cell, fmt
 
@@ -25,12 +36,21 @@ class _KillSignal(Exception):
     """Raised inside the VM loop to unwind it when the session ends."""
 
 
+class _EvalBudgetExceeded(Exception):
+    """Raised by the evaluate instruction counter (wrapped by the VM
+    into a NikoRuntimeError, whose message evaluate() reports)."""
+
+
 class Debugger:
     def __init__(self, path):
         self.path = str(path)
         self.breakpoints = {}          # path -> set of 1-based lines
         self.vm = VM()
         self.vm.trace_fn = self._on_ins
+        self.vm.input_fn = self._ask_input
+        self.on_input = None           # prompt -> str, called on the VM thread
+        self._module_files = {}        # '__import$mK' -> absolute module path
+        self._entry_path = str(path)
         self._resume = threading.Event()
         self._resume.set()
         self._lock = threading.Lock()
@@ -59,24 +79,54 @@ class Debugger:
 
     def run(self):
         """Compile and execute the program on the calling thread. Returns
-        when the program finishes, raises, or the session is killed."""
-        src = Path(self.path).read_text(encoding='utf8')
-        tree = parse(src)
-        check(tree, [])
-        from .ast import Program
-        module = compile_ast(Program(tree.line, tree.body))
+        when the program finishes, raises, or the session is killed.
+
+        Multi-file programs go through the module pipeline: every
+        reachable module is typechecked, then the graph is desugared to
+        one Program whose per-module wrapper functions keep their
+        original line numbers, so the session can pause inside imported
+        modules.
+        """
+        # Local import: modules.py pulls in packaging pieces the debugger
+        # doesn't need at import time.
+        from .modules import (build_module_graph, check_units,
+                              desugar_imports, _wrapper_name)
         buf = _OutputForwarder(self.on_output)
         try:
+            graph = build_module_graph(self.path)
+            check_units(graph)
+            self._entry_path = str(graph[-1].path)
+            self._module_files = {_wrapper_name(u.key): str(u.path)
+                                  for u in graph[:-1]}
+            module = compile_ast(desugar_imports(graph))
             with redirect_stdout(buf):
                 self.vm.run_module(module, {})
         except _KillSignal:
             pass
-        except NikoRuntimeError as e:
+        except Exception as e:
+            # Compile-time problems (parse/check/import errors) and
+            # runtime errors both end the session with a message and a
+            # terminated event, instead of leaving the client hanging.
             self.runtime_error = e
             self.on_output(f'Niko error: {e}\n')
         finally:
             buf.flush()
             self.on_terminated()
+
+    # -- source mapping ----------------------------------------------------
+
+    def _frame_path(self, frame):
+        """Absolute source path for a VM frame.
+
+        Module wrappers are `__import$mK` and their nested defs are
+        `__import$mK$name`, so the frame's qualname identifies its module
+        by prefix; anything else belongs to the entry file.
+        """
+        qual = getattr(frame, 'qualname', None) or frame.name
+        for prefix, path in self._module_files.items():
+            if qual == prefix or qual.startswith(prefix + '$'):
+                return path
+        return self._entry_path
 
     # -- the VM hook -------------------------------------------------------
 
@@ -93,7 +143,7 @@ class Debugger:
         if self.stop_on_entry and not self._entered:
             self._entered = True
             reason = 'entry'
-        elif line in self.breakpoints.get(self.path, ()):
+        elif line in self.breakpoints.get(self._frame_path(frame), ()):
             reason = 'breakpoint'
         elif self._step == 'in':
             reason = 'step'
@@ -108,7 +158,7 @@ class Debugger:
         snap = []
         for fr in frames:
             ln = fr.code[fr.ip - 1].line if fr.ip > 0 else ins.line
-            snap.append((fr.name, dict(fr.env), ln))
+            snap.append((fr.name, dict(fr.env), ln, self._frame_path(fr)))
         with self._lock:
             self._paused = snap
             self._stop_reason = reason
@@ -155,13 +205,74 @@ class Debugger:
             return self._paused is not None
 
     def stack(self):
-        """Innermost-first list of (name, env-dict, line)."""
+        """Innermost-first list of (name, env-dict, line, path)."""
         with self._lock:
             return list(reversed(self._paused or []))
 
     def stop_reason(self):
         with self._lock:
             return self._stop_reason
+
+    # -- input and evaluation (called on the VM thread) ----------------------
+
+    def _ask_input(self, prompt):
+        """The VM's `ask` statement reads through here.
+
+        The DAP adapter sets `on_input` to answer via a DAP reverse
+        request; with no callback this falls back to console stdin (for a
+        standalone CLI debugger, where stdin really is the console).
+        """
+        if self.on_input is not None:
+            return self.on_input(prompt)
+        return input(prompt)
+
+    def evaluate(self, expr_text, frame_index=0):
+        """Evaluate a simple expression against a paused frame's locals.
+
+        Returns (True, rendered value) or (False, error message). The
+        expression is typechecked with the frame's names defined, then run
+        on a fresh VM (no trace hook, so it can't re-pause the session)
+        with an instruction budget, so a runaway expression can't hang
+        anything. The paused program's own state is untouched except for
+        side effects the expression itself performs.
+        """
+        from .parser import parse_expr, ParseError
+        from .ast import Program, SetStmt
+        stack = self.stack()
+        if not (0 <= frame_index < len(stack)):
+            return False, f'no such frame: {frame_index}'
+        _name, env, line, _path = stack[frame_index]
+        try:
+            expr = parse_expr(expr_text, line)
+        except ParseError as e:
+            return False, str(e)
+        checker = Checker()
+        for k, v in env.items():
+            checker.define(k, _type_of_value(v), line)
+        prog = Program(line, [SetStmt(line, '__evalresult', expr)])
+        try:
+            checker.check(prog)
+        except TypeErrorNiko as e:
+            return False, str(e)
+        module = compile_ast(prog)
+        vm = VM()
+        vm.input_fn = self.vm.input_fn
+        budget = [500000]
+
+        def _count(_vm, _frames, _frame, _ins):
+            budget[0] -= 1
+            if budget[0] <= 0:
+                raise _EvalBudgetExceeded('evaluation exceeded its '
+                                          'instruction budget')
+
+        vm.trace_fn = _count
+        eval_env = {k: (v.value if isinstance(v, Cell) else v)
+                    for k, v in env.items()}
+        try:
+            vm.run_module(module, eval_env)
+        except NikoRuntimeError as e:
+            return False, str(e)
+        return True, describe_value(eval_env.get('__evalresult'))
 
 
 class _OutputForwarder(io.TextIOBase):
@@ -182,6 +293,28 @@ class _OutputForwarder(io.TextIOBase):
         if self._buf:
             self._callback(self._buf)
             self._buf = ''
+
+
+def _type_of_value(v):
+    """A Niko type for a runtime value, for the evaluate() checker."""
+    from .typecheck import ANY, NUMBER, TEXT, BOOLEAN, LIST, MAP, FUNCTION, NOTHING
+    if isinstance(v, Cell):
+        v = v.value
+    if v is None:
+        return NOTHING
+    if isinstance(v, bool):
+        return BOOLEAN
+    if isinstance(v, (int, float)):
+        return NUMBER
+    if isinstance(v, str):
+        return TEXT
+    if isinstance(v, list):
+        return LIST
+    if isinstance(v, dict):
+        return MAP
+    if isinstance(v, VMFunction):
+        return FUNCTION
+    return ANY
 
 
 def describe_value(v):

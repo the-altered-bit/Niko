@@ -170,6 +170,21 @@ match cases in `tests/test_formatter.py`.
   module file, `pkg:` via a lockfile pin, `./` import inside the package,
   missing-module graceful null, alias pin). Full suite green. See
   `RELEASE_NOTES_ALPHA17.md`.
+- **Alpha 18 is complete**: debugger upgrades — multi-file debugging,
+  `ask` under the debugger, and `evaluate`. The debugger compiles through
+  the module pipeline, so breakpoints/stepping/stack traces follow
+  execution into imported modules (each frame's qualname maps it back to
+  its file; every `stackTrace` frame carries its own `source`). The VM's
+  `INPUT` opcode reads through a new `input_fn` hook; the DAP adapter
+  answers `ask` with a reverse `input` request to the client, bounded
+  (30s default, `inputTimeout` launch arg, wakes on disconnect) so a
+  silent client can never hang the session. New DAP `evaluate` request:
+  simple expressions against a paused frame's locals, run on a fresh VM
+  with an instruction budget. Tests: extended `tests/test_dap.py`
+  (timeout-guarded DAP client; multi-file breakpoint/step/evaluate
+  fixture, `ask` answered via reverse `input`, never-answered `input`
+  proving the timeout fallback). Full suite green. See
+  `RELEASE_NOTES_ALPHA18.md`.
 
 ## Standing cautions
 

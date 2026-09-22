@@ -4,10 +4,13 @@ Start it with `niko2 debug`. It speaks enough DAP for real debugging in
 VS Code (via the bundled Niko extension) or any DAP-capable client:
 
 - `launch` with a `program` path, optional `stopOnEntry`
-- `setBreakpoints` (line breakpoints, verified)
+- `setBreakpoints` (line breakpoints, verified; works in the entry file
+  and in any imported module)
 - `continue`, `next` (step over), `stepIn`, `stepOut`
-- `threads`, `stackTrace`, `scopes`, `variables` (locals, with one level
+- `threads`, `stackTrace` (each frame carries its own file, so the editor
+  opens imported modules), `scopes`, `variables` (locals, with one level
   of list/record expansion)
+- `evaluate` (simple expressions against a paused frame's locals)
 - `output` events carry the program's `say` output; `terminated` ends
   the session
 
@@ -15,13 +18,23 @@ The program runs on a worker thread; the adapter thread owns the
 protocol. All writes to stdout go through one lock so events from the
 worker thread can't interleave with responses.
 
-Limits (Alpha 7): single-file programs (`use` imports aren't loaded);
-`ask` for input isn't supported while debugging — the program would be
-reading the debug protocol stream.
+`ask` (Alpha 18): the debuggee's stdin is the DAP protocol stream, so the
+adapter answers `ask` with a DAP *reverse* request (`input`, carrying the
+prompt) to the client and waits for its response. A client that answers
+keeps the program going; a client that errors or stays silent gets a
+bounded wait (30s), after which the program receives "" and a warning is
+emitted -- the session can never hang on input. Note this is a
+Niko-specific reverse request: stock VS Code does not answer it, so under
+VS Code `ask` currently yields "" after the timeout.
+
+Limits (Alpha 18): `use` imports are still not loaded under the debugger
+(a program with `use` lines fails with a clear "I don't know what ..."
+runtime error naming the missing name).
 """
 import os
 import sys
 import threading
+import time
 
 from .jsonrpc import read_message, write_message
 from .debug import Debugger, describe_value, type_of_value
@@ -38,15 +51,26 @@ class Adapter:
         self._var_refs = {}
         self._next_ref = 3000
         self._exited = False
+        # Alpha 18: pending `ask` reverse requests: seq -> [Event, box].
+        # Guarded by _input_lock; the VM worker thread waits on the Event
+        # while the adapter thread keeps serving the protocol.
+        self._input_lock = threading.Lock()
+        self._input_waiters = {}
+        self._input_timeout = 30
 
     # -- protocol plumbing -------------------------------------------------
 
-    def _send(self, obj):
+    def _send_raw(self, obj):
+        """Send a message already carrying type/command; returns its seq."""
         with self._write_lock:
             self._seq += 1
             obj = dict(obj)
             obj['seq'] = self._seq
             write_message(self.stdout, obj)
+            return self._seq
+
+    def _send(self, obj):
+        return self._send_raw(obj)
 
     def _respond(self, req, body=None, success=True):
         msg = {'type': 'response', 'request_seq': req['seq'],
@@ -83,12 +107,67 @@ class Adapter:
         dbg.on_terminated = lambda: self._event('terminated')
         dbg.on_output = lambda text: self._event(
             'output', {'category': 'stdout', 'output': text})
+        dbg.on_input = self._debuggee_input
         self.debugger = dbg
         return dbg
+
+    # -- `ask` under the debugger --------------------------------------------
+
+    def _debuggee_input(self, prompt):
+        """Answer the debuggee's `ask` via a DAP reverse `input` request.
+
+        Called on the VM worker thread. The adapter thread keeps serving
+        the protocol, so the client's response is picked up by
+        `_on_reverse_response` below. The wait is bounded (and wakes early
+        on disconnect), so a client that never answers can't hang the
+        session: the program gets "" and a warning goes to the console.
+        """
+        self._event('output', {'category': 'stdout', 'output': prompt})
+        ev = threading.Event()
+        box = {}
+        with self._input_lock:
+            seq = self._send_raw({'type': 'request', 'command': 'input',
+                                  'arguments': {'prompt': prompt}})
+            self._input_waiters[seq] = (ev, box)
+        deadline = time.monotonic() + self._input_timeout
+        while not ev.is_set():
+            if self.debugger is not None and self.debugger._killed:
+                break  # disconnect: wake promptly, don't wait out input
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break  # absolute bound even if the client stays silent
+            ev.wait(timeout=min(0.2, remaining))
+        with self._input_lock:
+            self._input_waiters.pop(seq, None)
+        if 'text' in box:
+            return box['text']
+        self._event('output', {'category': 'stderr',
+                               'output': 'ask: no answer from the debug '
+                                         'client; using ""\n'})
+        return ''
+
+    def _on_reverse_response(self, msg):
+        """Handle a client's response to one of our reverse requests."""
+        seq = msg.get('request_seq')
+        with self._input_lock:
+            waiter = self._input_waiters.get(seq)
+        if waiter is None or msg.get('command') != 'input':
+            return
+        ev, box = waiter
+        if msg.get('success'):
+            body = msg.get('body') or {}
+            if 'text' in body:
+                box['text'] = body['text']
+        ev.set()
 
     # -- dispatch --------------------------------------------------------------
 
     def handle(self, msg):
+        if msg.get('type') == 'response':
+            # A client's answer to one of our reverse requests (e.g. the
+            # `input` request the `ask` implementation sends).
+            self._on_reverse_response(msg)
+            return True
         if msg.get('type') != 'request':
             return True
         cmd = msg.get('command')
@@ -114,7 +193,8 @@ class Adapter:
     # -- requests ------------------------------------------------------------------
 
     def _on_initialize(self, req, args):
-        self._respond(req, {'supportsConfigurationDoneRequest': True})
+        self._respond(req, {'supportsConfigurationDoneRequest': True,
+                            'supportsEvaluateForHovers': True})
         self._event('initialized')
 
     def _on_launch(self, req, args):
@@ -124,6 +204,10 @@ class Adapter:
             return
         dbg = self._ensure_debugger(req, program)
         dbg.stop_on_entry = bool(args.get('stopOnEntry', False))
+        # Test hook (also useful for clients that never answer `input`):
+        # bound how long `ask` waits for the client's answer.
+        if 'inputTimeout' in args:
+            self._input_timeout = float(args['inputTimeout'])
         self._respond(req)
 
     def _on_setBreakpoints(self, req, args):
@@ -133,9 +217,9 @@ class Adapter:
         if self.debugger is None:
             self._fail(req, 'no active launch')
             return
-        # The debugger was created for the launch program; breakpoints for
-        # any other path are recorded but never hit (single-file programs
-        # in Alpha 7).
+        # Breakpoints may target the launch program or any module it
+        # imports: the debugger maps each paused frame back to its source
+        # file (Alpha 18), so cross-file breakpoints hit.
         self.debugger.set_breakpoints(path, lines)
         self._respond(req, {'breakpoints': [
             {'verified': True, 'line': ln} for ln in lines]})
@@ -154,14 +238,14 @@ class Adapter:
     def _on_stackTrace(self, req, args):
         frames = []
         if self.debugger is not None and self.debugger.paused:
-            for i, (name, env, line) in enumerate(self.debugger.stack()):
+            for i, (name, env, line, path) in enumerate(self.debugger.stack()):
                 frames.append({
                     'id': i,
                     'name': name,
                     'line': line,
                     'column': 1,
-                    'source': {'name': os.path.basename(self.debugger.path),
-                               'path': self.debugger.path},
+                    'source': {'name': os.path.basename(path),
+                               'path': path},
                 })
         self._respond(req, {'stackFrames': frames, 'totalFrames': len(frames)})
 
@@ -191,7 +275,7 @@ class Adapter:
                 stack = self.debugger.stack()
                 idx = ref - 2000
                 if 0 <= idx < len(stack):
-                    _name, env, _line = stack[idx]
+                    _name, env, _line, _path = stack[idx]
                     for k in sorted(env):
                         if k.startswith('$'):
                             continue  # hidden compiler slots
@@ -234,6 +318,23 @@ class Adapter:
             return
         self._respond(req)
         self.debugger.step_out()
+
+    def _on_evaluate(self, req, args):
+        # Alpha 18: simple expressions against a paused frame's locals.
+        if self.debugger is None or not self.debugger.paused:
+            self._fail(req, 'not paused')
+            return
+        expr = args.get('expression', '')
+        frame_id = args.get('frameId', 0)
+        try:
+            ok, text = self.debugger.evaluate(expr, frame_id)
+        except Exception as e:
+            self._fail(req, f'evaluate failed: {e}')
+            return
+        if ok:
+            self._respond(req, {'result': text, 'variablesReference': 0})
+        else:
+            self._fail(req, text)
 
     def _on_disconnect(self, req, args):
         if self.debugger is not None:

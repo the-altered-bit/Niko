@@ -41,8 +41,12 @@ configuration), or create a launch config:
 }
 ```
 
-Notes: debugging runs single-file programs (`use` imports are not
-loaded); `ask` for input is not supported while debugging.
+Notes: breakpoints, stepping, and stack traces work across `import`ed
+modules (each stack frame opens its own file); `use` imports are not
+loaded under the debugger. `ask` for input is answered through a
+Niko-specific DAP reverse `input` request — debug clients that don't
+answer it (including stock VS Code) give the program `""` after a
+30-second timeout.
 
 ## Grammar tests
 

@@ -3,13 +3,25 @@
 Spawns `python -m niko2 debug` and speaks real DAP against a small
 program: launch, set a breakpoint, hit it three times, inspect the
 stack and the `total` variable, step once, continue to termination.
+
+Alpha 18 extends this file: multi-file debugging (breakpoints, stepping,
+and stack frames inside imported modules), `ask` under the debugger
+(answered through the adapter's reverse `input` request, with a timeout
+fallback so the session can never hang on input), and the `evaluate`
+request.
 """
 import json
 import os
 import pathlib
+import select
+import signal
 import subprocess
 import sys
 import tempfile
+
+# Never hang the suite: a regression that wedges the adapter fails loudly
+# (SIGALRM terminates the run) instead of blocking forever on a read.
+signal.alarm(900)
 
 root = pathlib.Path(__file__).resolve().parent.parent
 
@@ -144,3 +156,279 @@ try:
 finally:
     client.close()
     os.unlink(prog)
+
+
+# ---------------------------------------------------------------------------
+# Alpha 18: multi-file debugging, `ask` under the debugger, `evaluate`.
+#
+# A timeout-guarded DAP client: every read is bounded via select, so a
+# regression that hangs the adapter fails loudly instead of hanging the
+# suite. It also understands the adapter's reverse `input` request, which
+# is how `ask` is answered while debugging.
+
+
+class TimedClient:
+    def __init__(self, timeout=20):
+        env = dict(os.environ, PYTHONPATH=str(root))
+        self.proc = subprocess.Popen(
+            [sys.executable, '-m', 'niko2', 'debug'],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            cwd=root, env=env,
+        )
+        self._seq = 0
+        self.stash = []
+        self.timeout = timeout
+        # Raw byte buffer for adapter output. NOTE: we read via os.read on
+        # the raw fd, never via the BufferedReader: select() only sees
+        # kernel-buffered bytes, so mixing select with readline() would
+        # miss messages already pulled into the reader's userspace buffer.
+        self._out_buf = b''
+        self._out_fd = self.proc.stdout.fileno()
+
+    def _send(self, obj):
+        body = json.dumps(obj).encode('utf-8')
+        self.proc.stdin.write(b'Content-Length: ' + str(len(body)).encode() + b'\r\n\r\n' + body)
+        self.proc.stdin.flush()
+
+    @staticmethod
+    def _try_parse(buf):
+        head, sep, rest = buf.partition(b'\r\n\r\n')
+        if not sep:
+            return None, buf
+        headers = {}
+        for line in head.split(b'\r\n'):
+            if b':' in line:
+                k, v = line.split(b':', 1)
+                headers[k.strip().lower()] = v.strip()
+        try:
+            length = int(headers.get(b'content-length', 0))
+        except ValueError:
+            raise AssertionError(f'bad DAP framing: {buf[:200]!r}')
+        if not length or len(rest) < length:
+            return None, buf
+        return json.loads(rest[:length].decode('utf-8')), rest[length:]
+
+    def _read(self):
+        while True:
+            msg, self._out_buf = self._try_parse(self._out_buf)
+            if msg is not None:
+                return msg
+            r, _, _ = select.select([self._out_fd], [], [], self.timeout)
+            assert r, (f'timed out after {self.timeout}s waiting for adapter '
+                       f'output; stash={self.stash!r}')
+            chunk = os.read(self._out_fd, 65536)
+            assert chunk, 'adapter closed stdout'
+            self._out_buf += chunk
+
+    def _request_raw(self, command, arguments=None):
+        self._seq += 1
+        self._send({'seq': self._seq, 'type': 'request',
+                    'command': command, 'arguments': arguments or {}})
+        while True:
+            msg = self._read()
+            if msg.get('type') == 'response' and msg.get('request_seq') == self._seq:
+                return msg
+            self.stash.append(msg)
+
+    def request(self, command, arguments=None):
+        msg = self._request_raw(command, arguments)
+        assert msg.get('success'), f'{command} failed: {msg}'
+        return msg.get('body', {})
+
+    def wait_event(self, name):
+        for msg in list(self.stash):
+            if msg.get('type') == 'event' and msg.get('event') == name:
+                self.stash.remove(msg)
+                return msg.get('body', {})
+        while True:
+            msg = self._read()
+            if msg.get('type') == 'event' and msg.get('event') == name:
+                return msg.get('body', {})
+            self.stash.append(msg)
+
+    def wait_request(self, command):
+        """Wait for a reverse request from the adapter (e.g. `input`)."""
+        for msg in list(self.stash):
+            if msg.get('type') == 'request' and msg.get('command') == command:
+                self.stash.remove(msg)
+                return msg
+        while True:
+            msg = self._read()
+            if msg.get('type') == 'request' and msg.get('command') == command:
+                return msg
+            self.stash.append(msg)
+
+    def respond(self, req, body):
+        self._send({'type': 'response', 'request_seq': req['seq'],
+                    'success': True, 'command': req['command'], 'body': body})
+
+    def outputs(self):
+        return [m.get('body', {}).get('output', '')
+                for m in self.stash
+                if m.get('type') == 'event' and m.get('event') == 'output']
+
+    def close(self):
+        try:
+            self.proc.stdin.close()
+        except BrokenPipeError:
+            pass
+        self.proc.wait(timeout=15)
+
+
+def _alpha18_workdir():
+    import shutil
+    workdir = pathlib.Path(tempfile.mkdtemp(prefix='niko-dbg18-'))
+    return workdir, shutil
+
+
+def test_multifile_debugging():
+    """Breakpoints, stepping, stack frames, and evaluate across an import."""
+    workdir, shutil = _alpha18_workdir()
+    try:
+        mod = workdir / 'mymod.niko'
+        mod.write_text('to add with a, b:\n    give back a + b\n')
+        main = workdir / 'main.niko'
+        main.write_text('import "mymod.niko" as m\n'
+                        'set r to m.add(2, 3)\n'
+                        'say r\n')
+        mod_p, main_p = str(mod.resolve()), str(main.resolve())
+
+        client = TimedClient()
+        try:
+            client.request('initialize', {'adapterID': 'niko-test'})
+            client.wait_event('initialized')
+            client.request('launch', {'program': main_p})
+            bp = client.request('setBreakpoints', {
+                'source': {'name': 'mymod.niko', 'path': mod_p},
+                'breakpoints': [{'line': 2}]})
+            assert bp['breakpoints'] == [{'verified': True, 'line': 2}], bp
+            bp2 = client.request('setBreakpoints', {
+                'source': {'name': 'main.niko', 'path': main_p},
+                'breakpoints': [{'line': 3}]})
+            assert bp2['breakpoints'] == [{'verified': True, 'line': 3}], bp2
+            client.request('configurationDone')
+
+            # the breakpoint inside the imported module hits, and the stack
+            # frame names the module file + line
+            stopped = client.wait_event('stopped')
+            assert stopped['reason'] == 'breakpoint', stopped
+            trace = client.request('stackTrace', {'threadId': 1})
+            top = trace['stackFrames'][0]
+            assert top['name'] == 'add', top
+            assert top['line'] == 2, top
+            assert top['source']['path'] == mod_p, top
+            assert trace['stackFrames'][1]['source']['path'] == main_p, trace
+
+            # evaluate against the paused module frame ...
+            ev = client.request('evaluate', {'expression': 'a + b',
+                                             'frameId': 0, 'context': 'repl'})
+            assert ev['result'] == '5', ev
+            # ... an unknown name is a clean failure, not a wedged session
+            bad = client._request_raw('evaluate', {'expression': 'nosuchname',
+                                                   'frameId': 0})
+            assert bad['success'] is False, bad
+            # ... and another paused frame works too
+            ev2 = client.request('evaluate', {'expression': '2 + 3',
+                                              'frameId': 1, 'context': 'repl'})
+            assert ev2['result'] == '5', ev2
+
+            # step out of the module function: lands back in the entry file
+            client.request('stepOut')
+            stepped = client.wait_event('stopped')
+            assert stepped['reason'] == 'step', stepped
+            trace2 = client.request('stackTrace', {'threadId': 1})
+            assert trace2['stackFrames'][0]['source']['path'] == main_p, trace2
+            assert trace2['stackFrames'][0]['line'] == 2, trace2['stackFrames'][0]
+
+            # continue: the entry-file breakpoint still works, and locals
+            # are inspectable there
+            client.request('continue')
+            client.wait_event('continued')
+            stopped2 = client.wait_event('stopped')
+            assert stopped2['reason'] == 'breakpoint', stopped2
+            trace3 = client.request('stackTrace', {'threadId': 1})
+            assert trace3['stackFrames'][0]['line'] == 3, trace3
+            assert trace3['stackFrames'][0]['source']['path'] == main_p
+            scopes = client.request('scopes', {'frameId': 0})
+            variables = client.request(
+                'variables',
+                {'variablesReference': scopes['scopes'][0]['variablesReference']})
+            by_name = {v['name']: v for v in variables['variables']}
+            assert by_name['r']['value'] == '5', by_name['r']
+
+            client.request('continue')
+            client.wait_event('continued')
+            client.wait_event('terminated')
+            assert any(o.strip() == '5' for o in client.outputs()), client.outputs()
+
+            client.request('disconnect')
+            print('test_dap.py (Alpha 18): multi-file debugging + evaluate passed')
+        finally:
+            client.close()
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def test_ask_under_debugger():
+    """`ask` is answered through the adapter's reverse `input` request."""
+    workdir, shutil = _alpha18_workdir()
+    try:
+        prog = workdir / 'askme.niko'
+        prog.write_text('ask "What is your name? " into name\n'
+                        'say "hello " + name\n')
+        client = TimedClient()
+        try:
+            client.request('initialize', {'adapterID': 'niko-test'})
+            client.wait_event('initialized')
+            client.request('launch', {'program': str(prog.resolve())})
+            client.request('configurationDone')
+
+            req = client.wait_request('input')
+            assert req['arguments']['prompt'] == 'What is your name? ', req
+            client.respond(req, {'text': 'Casper'})
+
+            client.wait_event('terminated')
+            assert any('hello Casper' in o for o in client.outputs()), client.outputs()
+
+            client.request('disconnect')
+            print('test_dap.py (Alpha 18): ask under debugger passed')
+        finally:
+            client.close()
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def test_ask_timeout_fallback():
+    """A client that never answers `input` can't hang the session: after
+    the (short, launch-configured) timeout the program gets "" and a
+    warning, then runs to termination."""
+    workdir, shutil = _alpha18_workdir()
+    try:
+        prog = workdir / 'askme.niko'
+        prog.write_text('ask "Name? " into name\nsay "hi " + name\n')
+        client = TimedClient(timeout=25)
+        try:
+            client.request('initialize', {'adapterID': 'niko-test'})
+            client.wait_event('initialized')
+            client.request('launch', {'program': str(prog.resolve()),
+                                      'inputTimeout': 1})
+            client.request('configurationDone')
+
+            # the adapter asks ... and we deliberately never answer
+            client.wait_request('input')
+            client.wait_event('terminated')
+            outs = client.outputs()
+            assert any('ask: no answer' in o for o in outs), outs
+            assert any('hi ' in o for o in outs), outs
+
+            client.request('disconnect')
+            print('test_dap.py (Alpha 18): ask timeout fallback passed')
+        finally:
+            client.close()
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+test_multifile_debugging()
+test_ask_under_debugger()
+test_ask_timeout_fallback()

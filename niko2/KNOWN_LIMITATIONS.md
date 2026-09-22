@@ -148,11 +148,17 @@ it's formatting/diagnosing is closer to feature-complete.
 
 ## Alpha 7 tooling limits
 
-- **Debugger runs single-file programs.** `use` imports are not loaded
-  under `niko2 debug`; a program with `use` lines will fail to check.
-- **`ask` doesn't work while debugging.** The debuggee's stdin is the
-  DAP protocol stream, so `ask` would consume protocol bytes. (Not yet
-  guarded with a friendly error — it will simply misbehave.)
+- **`use` imports are not loaded under `niko2 debug`.** A program with
+  `use` lines typechecks (the names are known) but fails at runtime with
+  `Niko error: I don't know what "…" is.` naming the missing name.
+- **`ask` under the debugger needs a cooperating client.** The debuggee's
+  stdin is the DAP protocol stream, so the adapter answers `ask` with a
+  Niko-specific reverse `input` request to the debug client (prompt in
+  the arguments). A client that answers keeps the program going; one
+  that errors or stays silent gets a bounded wait (30s, `inputTimeout`
+  launch arg) and the program receives `""` with a warning. Stock VS
+  Code does not answer reverse `input` requests, so under VS Code `ask`
+  currently yields `""` after the timeout.
 - **Hover and go-to-definition are line-oriented.** AST nodes carry line
   numbers but not columns, so the language server resolves to the
   nearest sensible line rather than an exact range.
@@ -163,9 +169,8 @@ it's formatting/diagnosing is closer to feature-complete.
 - **The VS Code extension is not on the Marketplace.** Install
   `editors/vscode/niko-0.7.0.vsix` via *Extensions: Install from
   VSIX…*.
-- Future debugger work: expression evaluation (`evaluate` request),
-  conditional breakpoints, `use`-import support, and a friendlier
-  `ask`-under-debugger story.
+- Future debugger work: conditional breakpoints, `use`-import support,
+  and data breakpoints / logpoints.
 
 ## Alpha 8 WASM backend limits
 
