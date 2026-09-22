@@ -9,20 +9,24 @@ Protocol for a good editing experience in any LSP-capable editor:
   the file
 - `textDocument/hover` — builtin docs and inferred types of your names;
   follows `import` across files (Alpha 21: `alias.name` shows the
-  target's signature and doc comment from the module file)
+  target's signature and doc comment from the module file) and `use`
+  across files (Alpha 22: a bare name merged in by `use` shows the
+  target's signature and doc comment from the used file)
 - `textDocument/definition` — jump to where a name was defined, following
   `import` across files (Alpha 17: `alias.name` jumps to the top-level
   `set`/`to` in the module file; the import's path string jumps to the
-  module file itself)
+  module file itself) and `use` across files (Alpha 22: a bare name
+  merged in by `use` jumps to the top-level `set`/`to` in the used file;
+  the use's path string jumps to the used file itself)
 - `textDocument/formatting` — runs `niko2 format` on the whole document
 
 Hover and go-to-definition are line-oriented: Niko 2 AST nodes carry line
 numbers but not columns, so results resolve to the nearest sensible line
 (see `niko2/symbols.py`). Cross-file definition reuses
-`niko2/modules.py`'s import resolution, so `pkg:` imports, relative
+`niko2/modules.py`'s import/use resolution, so `pkg:` imports, relative
 `./` imports inside packages, NIKO_PATH, and the bundled stdlib all work
-exactly as they do at compile time; an import that can't be resolved
-simply yields no definition (never an error).
+exactly as they do at compile time; an import or use that can't be
+resolved simply yields no definition (never an error).
 """
 import re
 import sys
@@ -36,8 +40,8 @@ from .parser import parse, ParseError
 from .typecheck import check, TypeErrorNiko, BUILTIN_NAMES
 from .formatter import format_program
 from .symbols import collect_symbols, find_symbol, all_names, _infer
-from .ast import Node, ImportStmt, AttrExpr, NameExpr, SetStmt, FunctionDef
-from .modules import resolve_import, ImportErrorNiko
+from .ast import Node, ImportStmt, UseStmt, AttrExpr, NameExpr, SetStmt, FunctionDef
+from .modules import resolve_import, resolve_use, ImportErrorNiko
 
 VERSION = '2.0.0-alpha.7'
 
@@ -156,6 +160,51 @@ def _resolve_import_target(importer, raw_path, line):
                               line, importer)
     except ImportErrorNiko:
         return None
+
+
+def _resolve_use_target(importer, raw_module, line):
+    """Absolute Path of the file a `use` string points at, or None.
+
+    Reuses `modules.resolve_use`, so the LSP resolves exactly what the
+    compiler resolves (builtin-name uses yield None -- those names are
+    builtins; the importing file's dir, NIKO_PATH, the bundled stdlib,
+    cwd). Unresolvable uses yield None -- the request then reports "no
+    definition", never an error.
+    """
+    try:
+        return resolve_use(raw_module, str(Path(importer).parent),
+                           line, importer)
+    except ImportErrorNiko:
+        return None
+
+
+def _search_use_tree(importer, tree, word, seen):
+    """(target Path, defining node) for `word` through the tree's
+    top-level `use` statements, or None.
+
+    Later `use` statements win on name conflicts; a used file's own
+    top-level `set`/`to` beats names it pulled in through its own
+    `use`s; transitive uses are followed (the compiler flattens them
+    into one scope). `seen` guards against use cycles. Builtin-name
+    uses are skipped -- those names are builtins.
+    """
+    uses = [n for n in tree.body if isinstance(n, UseStmt)]
+    for n in reversed(uses):
+        target = _resolve_use_target(importer, n.module, n.line)
+        if target is None or target in seen:
+            continue
+        seen.add(target)
+        node, _lines = _module_top_level(target, word)
+        if node is not None:
+            return target, node
+        try:
+            sub = parse(Path(target).read_text(encoding='utf8'))
+        except (OSError, ParseError):
+            continue
+        found = _search_use_tree(str(target), sub, word, seen)
+        if found is not None:
+            return found
+    return None
 
 
 def _module_top_level(target, name):
@@ -380,6 +429,11 @@ class Server:
                 if sym.doc:
                     body += f'\n\n{sym.doc}'
                 return {'contents': {'kind': 'markdown', 'value': body}}
+        # Cross-file `use`: only when the name isn't defined in this file.
+        if tree is not None:
+            hov = self._hover_use(uri, tree, pos['line'] + 1, word)
+            if hov is not None:
+                return hov
         return None
 
     def _definition(self, params):
@@ -399,12 +453,19 @@ class Server:
             if loc is not None:
                 return loc
         root = self._symbols(uri)
-        if root is None:
-            return None
-        sym = find_symbol(root, word, pos['line'] + 1)
-        if sym is None or sym.kind == 'builtin':
-            return None
-        return _loc(uri, sym.line - 1)
+        if root is not None:
+            sym = find_symbol(root, word, pos['line'] + 1)
+            if sym is not None and sym.kind != 'builtin':
+                return _loc(uri, sym.line - 1)
+        # Cross-file `use`: only when the name isn't defined in this file
+        # (the entry's own definitions always win over used names).
+        if tree is not None:
+            loc = self._definition_use(uri, tree, lines[pos['line']],
+                                       pos['line'] + 1,
+                                       pos['character'], word)
+            if loc is not None:
+                return loc
+        return None
 
     def _definition_import(self, uri, tree, line_text, line1, char, word):
         """Cross-file go-to-definition through `import` (Alpha 17).
@@ -480,6 +541,61 @@ class Server:
                                      'value': _module_hover_text(node,
                                                                  src_lines)}}
         return None
+
+    def _definition_use(self, uri, tree, line_text, line1, char, word):
+        """Cross-file go-to-definition through `use` (Alpha 22).
+
+        - Cursor on the quoted path of `use "…"`:
+          jump to the used file itself.
+        - Cursor on a bare name the file gets through `use` (the caller
+          checks the name isn't defined in this file first -- the entry's
+          own definitions always win over used names): jump to the
+          top-level `set`/`to` defining it in the used file.
+        Returns None when the cursor isn't on either, the name isn't
+        provided by any `use`, or the use can't be resolved (builtin-name
+        use, missing file): the request then reports "no definition",
+        never an error.
+        """
+        importer = _uri_to_path(uri)
+        if importer is None:
+            return None
+        for n in tree.body:
+            if isinstance(n, UseStmt) and n.line == line1:
+                q = n.module.strip()
+                i = line_text.find(q)
+                if i != -1 and i <= char < i + len(q):
+                    target = _resolve_use_target(importer, n.module, n.line)
+                    if target is None:
+                        return None
+                    return _loc(_path_to_uri(target), 0)
+        found = _search_use_tree(importer, tree, word, set())
+        if found is None:
+            return None
+        target, node = found
+        return _loc(_path_to_uri(target), node.line - 1)
+
+    def _hover_use(self, uri, tree, line1, word):
+        """Cross-file hover through `use` (Alpha 22).
+
+        Cursor on a bare name the file gets through `use`: render the
+        target's signature and doc comment from the used file (same
+        resolution as `_definition_use`). In-file definitions win -- the
+        caller checks those first. Returns None when the name isn't
+        provided by any `use` or the use can't be resolved: the request
+        then reports "no hover", never an error.
+        """
+        importer = _uri_to_path(uri)
+        if importer is None:
+            return None
+        found = _search_use_tree(importer, tree, word, set())
+        if found is None:
+            return None
+        target, _node = found
+        node, src_lines = _module_top_level(target, word)
+        if node is None:
+            return None
+        return {'contents': {'kind': 'markdown',
+                             'value': _module_hover_text(node, src_lines)}}
 
     def _format(self, params):
         uri = params['textDocument']['uri']

@@ -163,7 +163,15 @@ many files import it (import cache), and transitive imports just work.
 Importing a file in a circle (`a` imports `b` imports `a`) is a compile
 error. Errors inside an imported file are reported against that file.
 `use` (the older single-file include) can't appear inside imported
-modules. Paths resolve in order: the importing file's folder, each
+modules. `use "lib/util.niko"` (also top of the file only) is the
+unqualified sibling of `import`: it merges the used file's top-level
+`set`/`to` names straight into your scope, no alias. Used files run
+before the entry body, each exactly once per program (diamond-safe,
+transitive); on name conflicts the later `use` wins, and your own
+`set`s/`to`s always win over used names. A `use` cycle is a compile
+error (`use cycle: a.niko -> b.niko -> a.niko`); `import` can't appear
+inside a used file. `use` works identically on all three backends.
+Paths resolve in order: the importing file's folder, each
 `NIKO_PATH` folder, the bundled standard library (paths starting with
 `stdlib/`), then the current folder. The standard library is four
 pure-Niko modules — `import "stdlib/text.niko" as text` (text helpers),

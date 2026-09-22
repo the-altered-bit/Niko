@@ -308,3 +308,99 @@ try:
             os.environ['NIKO_PKG_CACHE'] = old_cache
 finally:
     shutil.rmtree(fixture, ignore_errors=True)
+
+
+# --- Alpha 22: cross-file go-to-definition + hover through `use` ------------
+fixture22 = tempfile.mkdtemp(prefix='niko-lsp-use-')
+try:
+    proj = pathlib.Path(fixture22) / 'proj'
+    (proj / 'lib').mkdir(parents=True)
+    (proj / 'lib' / 'helper.niko').write_text(
+        '# double(x)\n'
+        '# Double a number.\n'
+        'to double with x:\n'
+        '    give back x * 2\n'
+        '\n'
+        '# base: the shared base value.\n'
+        'set base to 21\n',
+        encoding='utf8')
+    main_src = (
+        'use "lib/helper.niko"\n'
+        'use "missing.niko"\n'
+        'set base to 999\n'
+        'say double(base)\n'
+        'say base\n'
+    )
+    (proj / 'main.niko').write_text(main_src, encoding='utf8')
+
+    client3 = Client()
+    try:
+        caps = client3.request('initialize', {'processId': None, 'rootUri': None, 'capabilities': {}})
+        assert caps['capabilities']['definitionProvider'] is True
+        client3.notify('initialized', {})
+
+        main_uri = (proj / 'main.niko').as_uri()
+        helper_uri = (proj / 'lib' / 'helper.niko').as_uri()
+        client3.notify('textDocument/didOpen', {'textDocument': {
+            'uri': main_uri, 'languageId': 'niko', 'version': 1,
+            'text': main_src}})
+        diags = None
+        for _ in range(20):
+            msg = client3._read()
+            if msg.get('method') == 'textDocument/publishDiagnostics':
+                diags = msg['params']['diagnostics']
+                break
+            client3.notifications.append(msg)
+        # Known Alpha 22 gap: editor diagnostics run the plain checker,
+        # which doesn't know `use`-merged names -- `double` is flagged
+        # unknown even though it resolves at compile time.
+        assert diags is not None, 'no publishDiagnostics arrived'
+        assert any('unknown name "double"' in d['message'] for d in diags), diags
+
+        def goto(uri, line, char):
+            return client3.request('textDocument/definition', {
+                'textDocument': {'uri': uri},
+                'position': {'line': line, 'character': char}})
+
+        def hover(uri, line, char):
+            return client3.request('textDocument/hover', {
+                'textDocument': {'uri': uri},
+                'position': {'line': line, 'character': char}})
+
+        # the use's path string -> the used file itself
+        loc = goto(main_uri, 0, 8)
+        assert loc is not None and loc['uri'] == helper_uri \
+            and loc['range']['start']['line'] == 0, loc
+
+        # `double` (merged in by use) -> `to double` in the used file
+        # (0-based line 2)
+        loc = goto(main_uri, 3, 5)
+        assert loc is not None and loc['uri'] == helper_uri \
+            and loc['range']['start']['line'] == 2, loc
+
+        # the entry's own `set base` wins over the used file's `set base`
+        loc = goto(main_uri, 4, 5)
+        assert loc is not None and loc['uri'] == main_uri \
+            and loc['range']['start']['line'] == 2, loc
+
+        # missing used file: no crash, null result
+        assert goto(main_uri, 1, 8) is None
+
+        # hover on `double` shows the signature and doc comment from the
+        # used file
+        hov = hover(main_uri, 3, 5)
+        assert hov is not None, 'no hover for used name double'
+        val = hov['contents']['value']
+        assert 'double(x)' in val, val
+        assert 'Double a number.' in val, val
+
+        # hover on the entry's own `base` stays local (entry wins)
+        hov = hover(main_uri, 4, 5)
+        assert hov is not None and '**base**' in hov['contents']['value'], hov
+
+        client3.request('shutdown', {})
+        print('test_lsp.py (Alpha 22): use definition + hover assertions passed')
+    finally:
+        client3.close()
+finally:
+    shutil.rmtree(fixture22, ignore_errors=True)

@@ -5,7 +5,7 @@ from .parser import parse,ParseError,format_parse_error
 from .diagnostics import format_diagnostic
 from .runtime import Env,execute,NikoRuntimeError
 from .typecheck import check,TypeErrorNiko
-from .modules import ModuleLoader, VMLoader, ImportErrorNiko
+from .modules import ImportErrorNiko
 from .compiler import compile_ast, CompileError
 from .vm import VM
 from .project import init_project, find_project_root, read_manifest, collect_project_dependencies, write_lock_file
@@ -51,10 +51,10 @@ def collect_imported_names(path_or_name, seen=None):
 def compile_source(src,name='<memory>'):
     tree=parse(src)
     if name!='<memory>':
-        from .modules import _has_imports, prepare_program
-        if _has_imports(tree):
-            # Alpha 13: multi-file program -- resolve, check, and desugar
-            # every imported module into one Program before any backend
+        from .modules import _has_imports, _has_uses, prepare_program
+        if _has_imports(tree) or _has_uses(tree):
+            # Alpha 13/22: multi-file program -- resolve, check, and desugar
+            # every imported/used module into one Program before any backend
             # sees it.
             return prepare_program(Path(name), tree)
         imported=collect_imported_names(Path(name).resolve())
@@ -85,10 +85,10 @@ def _format_parse_error(e, src, name):
 
 def run(src,name='<memory>'):
     try:
-        tree=compile_source(src,name); env=Env(); loader=ModuleLoader([Path(name).parent if name!='<memory>' else Path('.')])
-        for n in tree.body:
-            if n.__class__.__name__=='UseStmt': loader.load_into(n.module,env,Path(name).parent if name!='<memory>' else Path('.'))
-        execute([n for n in tree.body if n.__class__.__name__!='UseStmt'],env)
+        # Alpha 22: `use` goes through the module pipeline like `import`,
+        # so the tree is already one desugared program here.
+        tree=compile_source(src,name); env=Env()
+        execute(tree.body,env)
     except ParseError as e:
         print(_format_parse_error(e, src, name)); return 1
     except (TypeErrorNiko,NikoRuntimeError,ImportErrorNiko) as e:
@@ -326,15 +326,10 @@ def main():
                 save_nikoir(module,out); print(f'✓ built {out}'); return 0
             for i,x in enumerate(module.code): print(f'{i:04} {x.op:16} {x.arg!r}')
             return 0
-        # Alpha 4: execute modules and the main program in one shared VM environment.
+        # Alpha 22: `use` goes through the module pipeline like `import`
+        # (compile_source desugars both); the tree is already one program.
         vm=VM(); env={}
-        base=Path(a.file).parent.resolve()
-        loader=VMLoader([find_project_root(a.file)])
-        for n in tree.body:
-            if n.__class__.__name__=='UseStmt': loader.load(n.module,env,base,vm)
-        from .ast import Program
-        main_tree=Program(tree.line,[n for n in tree.body if n.__class__.__name__!='UseStmt'])
-        module=compile_ast(main_tree)
+        module=compile_ast(tree)
         vm.run_module(module,env); return 0
     except ParseError as e:
         print(_format_parse_error(e, src, a.file)); return 1

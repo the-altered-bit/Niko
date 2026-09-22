@@ -148,9 +148,12 @@ it's formatting/diagnosing is closer to feature-complete.
 
 ## Alpha 7 tooling limits
 
-- **`use` imports are not loaded under `niko2 debug`.** A program with
-  `use` lines typechecks (the names are known) but fails at runtime with
-  `Niko error: I don't know what "…" is.` naming the missing name.
+- **LSP diagnostics don't know `use`-merged names (Alpha 22 gap).**
+  The language server's live analysis runs the plain single-file
+  checker, so a bare name merged in by `use "…"` is flagged `unknown
+  name "…"` with a red squiggle even though it resolves at compile
+  time (same pre-existing pattern as `import` aliases). Go-to-definition
+  and hover follow `use` across files anyway.
 - **`ask` under the debugger needs a cooperating client.** The debuggee's
   stdin is the DAP protocol stream, so the adapter answers `ask` with a
   Niko-specific reverse `input` request to the debug client (prompt in
@@ -169,9 +172,16 @@ it's formatting/diagnosing is closer to feature-complete.
 - **The VS Code extension is not on the Marketplace.** Install
   `editors/vscode/niko-0.7.0.vsix` via *Extensions: Install from
   VSIX…*.
-- Future debugger work: `use`-import support (needs `use` routed through
-  the module pipeline with `__use$K` wrapper prefixes — see Alpha 21), and
-  data breakpoints / logpoints.
+- Future debugger work: data breakpoints / logpoints. (The old
+  `use`-import item is done — Alpha 22 routes `use` through the module
+  pipeline, so breakpoints, stepping, and frames work inside used
+  files.)
+- **A breakpoint on a call line re-fires when the call returns.**
+  Stepping into (or out of) a call on a line with a breakpoint, then
+  continuing, stops again on the same line: the post-call `STORE` still
+  carries the call's line number, and the armed breakpoint fires on it.
+  Pre-existing behavior, identical for single-file programs; clear the
+  breakpoint (or step past the line) to avoid the second stop.
 
 ## Alpha 8 WASM backend limits
 
@@ -179,9 +189,8 @@ it's formatting/diagnosing is closer to feature-complete.
   large integers lose precision exactly the way the VM's floats do.
 - **`upper`/`lower` are ASCII-only.** Non-ASCII text passes through
   unchanged.
-- **`import` modules work on all backends** (Alpha 13); see below. `use`
-  still isn't supported in WASM/native compilations of multi-file
-  programs — use `import` instead.
+- **`import` and `use` modules work on all backends** (Alpha 13 /
+  Alpha 22); see below.
 - **No file-I/O builtins** (`read_file`, `write_file`, `append_file`,
   `read_lines`, `file_exists`, `try_read_file`). They raise `CompileError`.
 - **Method calls work** (Alpha 13 added `x.method(...)` via the
@@ -206,7 +215,7 @@ generated code). Same value model as WASM (boxed values, f64 numbers).
   `say` output matches the VM exactly.
 - **`upper`/`lower` are ASCII-only**, like WASM.
 - **Method-call syntax works** (Alpha 13), same as WASM. `use` imports
-  aren't supported — use `import` for multi-file programs.
+  work too (Alpha 22) — byte-identical to the VM.
 - **Closures and first-class functions work** (Alpha 10): nested `to`
   captures enclosing locals by reference; functions are values (aliases,
   arguments, return values, list/record members) — byte-identical to the
@@ -223,7 +232,17 @@ generated code). Same value model as WASM (boxed values, f64 numbers).
 
 ## Alpha 13 modules limits
 
-- **The language server follows `import` for go-to-definition AND hover (Alpha 17/21) but diagnostics are otherwise single-file.** `niko2 lsp` jumps from `alias.name` to the top-level `set`/`to` in the module file, and from an import's path string to the module file itself — resolved through the same search path as the compiler (file dir → `NIKO_PATH` → bundled stdlib → cwd → package cache). Hover on `alias.name` shows the signature and doc comment from the module file. Diagnostics still analyze one file at a time (`import` aliases check as `map` so nothing breaks).
+- **The language server follows `import` AND `use` for go-to-definition
+  and hover (Alpha 17/21/22) but diagnostics are otherwise single-file.**
+  `niko2 lsp` jumps from `alias.name` to the top-level `set`/`to` in the
+  module file, from an import's path string to the module file itself,
+  from a `use`-merged bare name to its `set`/`to` in the used file, and
+  from a `use` path string to the used file — resolved through the same
+  search path as the compiler (file dir → `NIKO_PATH` → bundled stdlib →
+  cwd → package cache). Hover on `alias.name` / used names shows the
+  signature and doc comment from the module file. Diagnostics still
+  analyze one file at a time (`import` aliases check as `map` so nothing
+  breaks; `use`-merged names are flagged `unknown name` — see above).
 - **Module search path exists; the package manager shipped in Alpha 16.**
   `import` resolves: importing file's dir → `NIKO_PATH` dirs → bundled
   stdlib (`stdlib/…` paths) → cwd; a local/`NIKO_PATH` `stdlib/` tree

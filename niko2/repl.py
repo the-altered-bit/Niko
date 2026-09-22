@@ -26,7 +26,8 @@ program: ``say`` prints, ``set``/``to`` are silent.
 Imports: ``import "path/to/file.niko" as alias`` goes through the normal
 module search path (``niko2/modules.py``); relative paths resolve against
 the current working directory of the ``niko2 repl`` process. ``use "..."``
-statements are loaded through ``VMLoader`` exactly like ``niko2 run``.
+statements go through the same module pipeline (Alpha 22), so used files
+work exactly like ``niko2 run``.
 
 Colon commands (only at the primary prompt): ``:help``, ``:quit`` /
 ``:exit``, ``:reset``. Anything else starting with ``:`` gets a
@@ -60,16 +61,15 @@ Documented limits:
 #
 # Only the *delta* is compiled and executed: the desugared program is
 # always [M result-slot pre-declares][M module wrappers][M init calls]
-# [entry statements...] (M = number of imported modules), so the new
-# chunk is exactly the trailing entry statements after `self.entry_count`.
-# Imported modules are initialized once per session: wrapper defs,
-# pre-declares and init calls are re-emitted only for modules whose path
-# is not yet in `self.initialized_modules`, so re-checking the accumulated
-# source never re-runs a module body. `use "..."` statements in a new
-# chunk are loaded through VMLoader like `niko2 run` does. One VM and one
-# globals dict (`self.env`) live for the whole session; `:reset` drops
-# them. A chunk that parses and typechecks joins the history even if it
-# fails at runtime (like a script that crashes: earlier statements took
+# [hoisted use bindings][entry statements...] (M = number of imported or
+# used modules), so the new chunk is exactly the trailing entry statements
+# after `self.entry_count`. Imported/used modules are initialized once per
+# session: wrapper defs, pre-declares and init calls are re-emitted only
+# for modules whose path is not yet in `self.initialized_modules`, so
+# re-checking the accumulated source never re-runs a module body. One VM
+# and one globals dict (`self.env`) live for the whole session; `:reset`
+# drops them. A chunk that parses and typechecks joins the history even if
+# it fails at runtime (like a script that crashes: earlier statements took
 # effect); parse/type errors are rejected and never recorded.
 # ---------------------------------------------------------------------------
 
@@ -77,17 +77,16 @@ from pathlib import Path
 
 from .parser import parse, parse_expr, ParseError
 from .ast import Program
-from .typecheck import check, Checker, MAP, TypeErrorNiko
+from .typecheck import check, TypeErrorNiko
 from .compiler import compile_ast, CompileError
 from .vm import VM
 from .runtime import fmt, NikoRuntimeError
 from .modules import (
-    build_module_graph, desugar_imports, _has_imports,
-    VMLoader, ImportErrorNiko,
+    build_module_graph, check_units, desugar_imports, _has_imports,
+    _has_uses, ImportErrorNiko,
 )
 from .cli import (
     _format_error, _format_parse_error,
-    resolve_import_path, collect_imported_names,
 )
 
 try:
@@ -170,38 +169,11 @@ def _opens_block(stripped):
     return q is None
 
 
-def _repl_imported_names(entry_tree, base):
-    """Names the entry-unit checker pre-defines, mirroring
-    cli.collect_imported_names for real files: `use`-loaded module symbols
-    plus every top-level defined name (so later chunks -- and forward
-    references -- resolve)."""
-    names = []
-    for n in entry_tree.body:
-        if n.__class__.__name__ == 'UseStmt':
-            child = resolve_import_path(n.module, base)
-            if child is not None:
-                names += collect_imported_names(child)
-            else:
-                names += collect_imported_names(n.module)
-        if hasattr(n, 'name'):
-            names.append(n.name)
-    return names
-
-
-def _check_units_repl(graph, entry_tree, base):
-    """modules.check_units, but the entry unit pre-defines the REPL's
-    `use`/forward-reference names instead of reading them off a file."""
-    for unit in graph:
-        c = Checker()
-        for alias, _target, line in unit.imports:
-            c.define(alias, MAP, line)
-        if unit is graph[-1]:
-            c.import_names(_repl_imported_names(entry_tree, base))
-        try:
-            c.check(unit.tree)
-        except TypeErrorNiko as e:
-            e.path = str(unit.path)
-            raise
+def _repl_imported_names(entry_tree):
+    """Top-level defined names of the accumulated entry source, for
+    forward references across chunks. `use`d names come from the module
+    pipeline now (Alpha 22), not from a VMLoader-style walk."""
+    return [n.name for n in entry_tree.body if hasattr(n, 'name')]
 
 
 class ReplSession:
@@ -215,10 +187,9 @@ class ReplSession:
     def reset(self):
         self.src_parts = []            # effective source chunks, in order
         self.entry_count = 0           # top-level stmts across src_parts
-        self.initialized_modules = set()  # str(path) of imports already run
+        self.initialized_modules = set()  # str(path) of modules already run
         self.env = {}
         self.vm = VM()
-        self.loader = VMLoader([Path.cwd()])
         self.echo_seq = 0
         # Cumulative function table: vm.run_module() replaces
         # vm._functions with each module's table, which would orphan nested
@@ -352,24 +323,25 @@ class ReplSession:
         except ParseError as e:
             print(_format_parse_error(e, check_src, REPL_NAME))
             return False
-        base = Path.cwd()
         try:
-            if _has_imports(entry_tree):
+            if _has_imports(entry_tree) or _has_uses(entry_tree):
                 graph = build_module_graph(self._entry_path, entry_tree)
-                _check_units_repl(graph, entry_tree, base)
+                check_units(graph, _repl_imported_names(entry_tree))
                 prepared = desugar_imports(graph)
             else:
                 graph = None
-                check(entry_tree, _repl_imported_names(entry_tree, base))
+                check(entry_tree, _repl_imported_names(entry_tree))
                 prepared = entry_tree
         except (TypeErrorNiko, ImportErrorNiko) as e:
             print(_format_error(e, check_src, REPL_NAME))
             return False
 
         # Slice the delta out of the desugared program. Layout is always
-        # [M pre-declares][M wrappers][M init calls][entry stmts...], and
-        # entry statements stay in source order, so the new chunk is the
-        # trailing entry statements after self.entry_count.
+        # [M pre-declares][M wrappers][M init calls][entry stmts...]
+        # (M = imported + used modules; the entry section starts with the
+        # hoisted `use` bindings), and entry statements stay in source
+        # order, so the new chunk is the trailing entry statements after
+        # self.entry_count.
         n_mods = len(graph) - 1 if graph else 0
         entry_stmts = prepared.body[3 * n_mods:]
         new_entry = entry_stmts[self.entry_count:]
@@ -384,16 +356,12 @@ class ReplSession:
                                          prepared.body[2 * n_mods + i]))
                     new_unit_paths.append(p)
         try:
-            for n in new_entry:
-                if n.__class__.__name__ == 'UseStmt':
-                    self.loader.load(n.module, self.env, base, self.vm)
             if delta_prefix:
-                # Initialize newly-imported modules exactly once.
+                # Initialize newly-imported/used modules exactly once.
                 self._run(delta_prefix)
                 self.initialized_modules.update(new_unit_paths)
-            rest = [n for n in new_entry if n.__class__.__name__ != 'UseStmt']
-            if rest:
-                self._run(rest)
+            if new_entry:
+                self._run(new_entry)
         except (CompileError, NikoRuntimeError) as e:
             print(_format_error(e, check_src, REPL_NAME))
         except Exception as e:  # last resort: the loop never dies

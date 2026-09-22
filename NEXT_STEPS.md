@@ -73,8 +73,9 @@ match cases in `tests/test_formatter.py`.
   executable via the system C compiler (`niko2/backends/niko_runtime.c`,
   `native.py`). Tests: `tests/test_native.py` (differential vs VM).
   Native extras over WASM: `ask` and the file-I/O builtins work.
-  Limits: no `use` imports, no method calls, no first-class functions,
-  no closures over enclosing function locals, needs `cc`/`gcc`/`clang`.
+  Limits (at the time; `use` landed in Alpha 22): no `use` imports, no
+  method calls, no first-class functions, no closures over enclosing
+  function locals, needs `cc`/`gcc`/`clang`.
 - **Alpha 10 is complete**: closures + first-class functions on ALL backends
   (VM, WASM, native) — nested `to` captures enclosing locals by reference,
   functions are values, byte-identical output across backends. Tests:
@@ -183,7 +184,8 @@ match cases in `tests/test_formatter.py`.
   and only the delta is compiled + run on one session VM. Imports
   initialize once per session (module top-level `say` prints once across
   chunks incl. re-imports); relative imports resolve against cwd;
-  `use "…"` via `VMLoader`. Echo: bare expressions print `fmt(value)`,
+  `use "…"` via `VMLoader` (replaced by the shared module pipeline in
+  Alpha 22). Echo: bare expressions print `fmt(value)`,
   `nothing` never echoes. Implementation bug found & fixed: cumulative
   function table merged into each compiled module before `run_module`
   (VM untouched) so earlier chunks' nested functions stay resolvable.
@@ -211,11 +213,36 @@ match cases in `tests/test_formatter.py`.
   produce a wrong session (ambiguous frames, un-attributable
   breakpoints); the real fix is routing `use` through the module
   pipeline with `__use$K` wrapper prefixes (reusing Alpha 18's
-  attribution scheme), a future sprint. Tests: new
+  attribution scheme), a future sprint — **done in Alpha 22**). Tests: new
   `tests/test_function_header.py`,
   `tests/niko2_cases/function_colon.niko` (+`.out`), 4 new conditional
   breakpoint DAP cases, new cross-file hover LSP assertions. Full suite
   green. See `RELEASE_NOTES_ALPHA21.md`.
+- **Alpha 22 is complete**: `use` routed through the module pipeline.
+  `use "file.niko"` now goes through the same graph → check →
+  desugar pipeline as `import` (`niko2/modules.py`): use-units (key
+  `uK`, disjoint from import keys `mK`) desugar to `to __use$uK:`
+  wrappers returning `{exports}` records; each used file's top-level
+  code runs exactly once (diamond-safe, transitive); entry `use`s
+  become hoisted `set nm to __use$uK$result.nm` bindings — later `use`
+  wins on conflicts, the entry's own `set`s/`to`s win over used names.
+  Works byte-identically on VM/WASM/native (the old WASM/native
+  `CompileError("...doesn't support 'use' yet")` is gone). New errors:
+  `use cycle: a -> b -> a` (was silently recursive),
+  `cannot find module` for missing files,
+  `'import' is not supported inside used modules`,
+  `'use' is not supported inside imported modules` (kept). Builtin-name
+  uses (`use "math"`) stay no-ops everywhere. `ModuleLoader`/`VMLoader`
+  deleted; `cli.py`, `debug.py` (`__use$uK` frame attribution),
+  `lsp.py` (go-to-definition + hover follow `use`), and `repl.py`
+  (shared pipeline instead of `VMLoader`) updated. Known gaps: LSP
+  editor diagnostics still flag used names as unknown; `niko2 format`
+  renders `use "a.niko"` with doubled quotes; `use` inside a function
+  body stays silently ignored. Tests: new `tests/test_use_pipeline.py`
+  (13 checks: 3-way differential + error cases + attribution), new
+  `test_use_under_debugger` DAP case, new LSP definition/hover
+  assertions, new REPL `use-in-repl` case. Full suite green. See
+  `RELEASE_NOTES_ALPHA22.md` / `ALPHA22_DESIGN.md`.
 - **Alpha 19 is complete**: package registry + version-range solving.
   `niko2/semver.py` (range grammar: `*`, exact, partials, npm-style
   `^`/`~`, comparators, comma AND; `max_satisfying` solver,

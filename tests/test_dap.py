@@ -608,3 +608,110 @@ test_conditional_breakpoint()
 test_conditional_breakpoint_never_true()
 test_conditional_breakpoint_bad_condition()
 test_blank_condition_is_unconditional()
+
+
+def test_use_under_debugger():
+    """Alpha 22: breakpoints, stepping, and stack frames inside used files.
+
+    `use` goes through the module pipeline now, so the adapter's
+    __use$uK attribution maps frames back to the used file.
+    """
+    workdir, shutil = _alpha18_workdir()
+    try:
+        used = workdir / 'used.niko'
+        used.write_text('set offset to 5\n'
+                        'to bump with x:\n'
+                        '    give back x + offset\n')
+        main = workdir / 'main.niko'
+        main.write_text('use "used.niko"\n'
+                        'set r to bump(10)\n'
+                        'say r\n'
+                        'set r2 to bump(100)\n'
+                        'say r2\n')
+        used_p, main_p = str(used.resolve()), str(main.resolve())
+        client = TimedClient()
+        try:
+            client.request('initialize', {'adapterID': 'niko-test'})
+            client.wait_event('initialized')
+            client.request('launch', {'program': main_p})
+
+            # a breakpoint inside the used file verifies and hits with
+            # the used file/line on the stack
+            bp2 = client.request('setBreakpoints', {
+                'source': {'name': 'main.niko', 'path': main_p},
+                'breakpoints': [{'line': 2}]})
+            assert bp2['breakpoints'] == [{'verified': True, 'line': 2}], bp2
+            client.request('configurationDone')
+
+            # stop at the entry call first, then step INTO the used file:
+            # the top frame lands in used.niko at the right line
+            stopped = client.wait_event('stopped')
+            assert stopped['reason'] == 'breakpoint', stopped
+            client.request('stepIn')
+            stepped = client.wait_event('stopped')
+            assert stepped['reason'] == 'step', stepped
+            trace = client.request('stackTrace', {'threadId': 1})
+            top = trace['stackFrames'][0]
+            assert top['name'] == 'bump', top
+            assert top['line'] == 3, top
+            assert top['source']['path'] == used_p, top
+            assert trace['stackFrames'][1]['source']['path'] == main_p, trace
+
+            # locals from the used function's closure are inspectable
+            scopes = client.request('scopes', {'frameId': 0})
+            variables = client.request(
+                'variables',
+                {'variablesReference': scopes['scopes'][0]['variablesReference']})
+            by_name = {v['name']: v for v in variables['variables']}
+            assert by_name['x']['value'] == '10', by_name
+            assert by_name['offset']['value'] == '5', by_name
+
+            # step back out: lands in the entry file on the call line.
+            # (Clear the entry breakpoint first: the call line's STORE
+            # still carries line 2, so the armed breakpoint would re-fire
+            # on the way out -- pre-existing debugger behavior, not use
+            # specific.)
+            client.request('setBreakpoints', {
+                'source': {'name': 'main.niko', 'path': main_p},
+                'breakpoints': []})
+            client.request('stepOut')
+            stepped2 = client.wait_event('stopped')
+            assert stepped2['reason'] == 'step', stepped2
+            trace3 = client.request('stackTrace', {'threadId': 1})
+            assert trace3['stackFrames'][0]['source']['path'] == main_p, trace3
+            assert trace3['stackFrames'][0]['line'] == 2, trace3['stackFrames'][0]
+
+            # a breakpoint inside the used file verifies, and on the second
+            # call it fires with the used file on top of the stack
+            bp = client.request('setBreakpoints', {
+                'source': {'name': 'used.niko', 'path': used_p},
+                'breakpoints': [{'line': 3}]})
+            assert bp['breakpoints'] == [{'verified': True, 'line': 3}], bp
+
+            # continue: the used-file breakpoint fires on the second call,
+            # with the used file on top of the stack
+            client.request('continue')
+            client.wait_event('continued')
+            stopped2 = client.wait_event('stopped')
+            assert stopped2['reason'] == 'breakpoint', stopped2
+            trace2 = client.request('stackTrace', {'threadId': 1})
+            assert trace2['stackFrames'][0]['source']['path'] == used_p, trace2
+            assert trace2['stackFrames'][0]['line'] == 3, trace2['stackFrames'][0]
+            assert trace2['stackFrames'][0]['name'] == 'bump', trace2
+
+            client.request('continue')
+            client.wait_event('continued')
+            client.wait_event('terminated')
+            outs = client.outputs()
+            assert any(o.strip() == '15' for o in outs), outs
+            assert any(o.strip() == '105' for o in outs), outs
+
+            client.request('disconnect')
+            print('test_dap.py (Alpha 22): use under the debugger passed')
+        finally:
+            client.close()
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+test_use_under_debugger()

@@ -109,14 +109,18 @@ class Debugger:
         # Local import: modules.py pulls in packaging pieces the debugger
         # doesn't need at import time.
         from .modules import (build_module_graph, check_units,
-                              desugar_imports, _wrapper_name)
+                              desugar_imports, _wrapper_name,
+                              _use_wrapper_name)
         buf = _OutputForwarder(self.on_output)
         try:
             graph = build_module_graph(self.path)
             check_units(graph)
             self._entry_path = str(graph[-1].path)
-            self._module_files = {_wrapper_name(u.key): str(u.path)
-                                  for u in graph[:-1]}
+            self._module_files = {}
+            for u in graph[:-1]:
+                w = (_use_wrapper_name(u.key) if u.kind == 'use'
+                     else _wrapper_name(u.key))
+                self._module_files[w] = str(u.path)
             module = compile_ast(desugar_imports(graph))
             with redirect_stdout(buf):
                 self.vm.run_module(module, {})
@@ -137,9 +141,10 @@ class Debugger:
     def _frame_path(self, frame):
         """Absolute source path for a VM frame.
 
-        Module wrappers are `__import$mK` and their nested defs are
-        `__import$mK$name`, so the frame's qualname identifies its module
-        by prefix; anything else belongs to the entry file.
+        Module wrappers are `__import$mK` / `__use$uK` and their nested
+        defs are `__import$mK$name` / `__use$uK$name`, so the frame's
+        qualname identifies its module by prefix; anything else belongs
+        to the entry file.
         """
         qual = getattr(frame, 'qualname', None) or frame.name
         for prefix, path in self._module_files.items():

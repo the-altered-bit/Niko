@@ -228,6 +228,27 @@ def test_error_chunk_not_recorded():
           needles=['cannot assign text to number', '42'])
 
 
+def test_use_in_repl():
+    # Alpha 22: `use` goes through the shared module pipeline in the REPL
+    # too. A used file's names are visible in later chunks, and its
+    # top-level code runs exactly once per session.
+    d = SESSION / 'usetest'
+    d.mkdir(parents=True, exist_ok=True)
+    (d / 'helper.niko').write_text(
+        'say "helper-loaded"\nset who to "helper-who"\n'
+        'to greet with n:\n    give back "hi " + n\n')
+    check('use-in-repl',
+          'use "helper.niko"\n'
+          'say who\n'
+          'say greet("Casper")\n'
+          'use "helper.niko"\n'
+          'say who\n'
+          ':quit\n',
+          needles=['helper-loaded', 'helper-who', 'hi Casper'],
+          count=('helper-loaded', 1),
+          cwd=d)
+
+
 if __name__ == '__main__':
     try:
         test_banner_and_help()
@@ -247,6 +268,7 @@ if __name__ == '__main__':
         test_eof_exit_zero()
         test_eof_mid_block()
         test_error_chunk_not_recorded()
+        test_use_in_repl()
     except AssertionError as e:
         print(f'FAIL: {e}')
         sys.exit(1)
