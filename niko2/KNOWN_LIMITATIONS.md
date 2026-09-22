@@ -463,8 +463,22 @@ changes; remove the workarounds if the backend is fixed):
   `""` past the end, never panics) and call sites never rely on a
   guard to prevent the call.
 
-**WASM backend bug (new, found by `tests/test_json.py`): `while yes:`
-+ string indexing on multibyte text miscompiles.** Minimal repro:
+**WASM backend bug (new in Alpha 31, FIXED in Alpha 33): `while yes:` +
+string indexing on multibyte text miscompiled.** Root cause: in
+`niko2/backends/wasm.py`, `_b_item_of`'s text branch overwrote the
+byte-length local with the char count from `utf8_len`, then passed it as
+the *byte* length argument to `utf8_byte_offset`. For ASCII the two are
+equal, so nothing showed; for multibyte text the byte scan stopped early
+and the end offset of the final character(s) came back truncated, so
+`item_of` on the last character returned `""`. In a `while yes:`
+scan-to-terminator loop the terminator never matched, the loop ran past
+the end, and the host panicked with `Line 4: string index out of range`.
+Fix: keep the byte length in its own local (`blen`) and pass that to
+`utf8_byte_offset`. All other `utf8_byte_offset` call sites already kept
+the two separate. Pinned by `tests/test_wasm_unicode.py` (20 cases,
+3-way differential) and the flipped WASM assertion in
+`tests/test_json.py`. Minimal repro (now prints `héllo` on all three
+backends):
 
 ```niko
 to f2 with s: text, cur: map -> text:
@@ -481,13 +495,15 @@ to f2 with s: text, cur: map -> text:
 say f2("\"héllo\"", {pos: 2})
 ```
 
-VM/native print `héllo`; WASM dies with `Line 4: string index out of
-range` from the host. The same loop with a bounded `while`
-condition, or the same `item_of` calls outside `while yes:`, work on
-WASM; ASCII strings are unaffected everywhere. In `json.niko` this
-surfaces as `json.parse` failing on JSON strings containing raw
-multibyte UTF-8 (`json parse error at character 14: unterminated
-string` for `"héllo wörld"`), while `json.stringify` of multibyte
-text is correct on WASM. `tests/test_json.py` asserts the WASM
-failure explicitly (commented "flip when fixed") so a backend fix
-shows up as a test failure to update, not silent drift.
+VM/native print `héllo`; before the fix, WASM died with `Line 4: string
+index out of range` from the host. (The same loop with a bounded `while`
+condition appeared to work only because the truncated end offset still
+landed inside the string for non-final characters; ASCII strings were
+unaffected everywhere since char count equals byte length.) In
+`json.niko` this surfaced as `json.parse` failing on JSON strings
+containing raw multibyte UTF-8 (`json parse error at character 14:
+unterminated string` for `"héllo wörld"`), while `json.stringify` of
+multibyte text was correct on WASM. `tests/test_json.py` asserted the
+WASM failure explicitly (commented "flip when fixed"); the assertion is
+now flipped to success, and `tests/test_wasm_unicode.py` pins the fix
+3-way.

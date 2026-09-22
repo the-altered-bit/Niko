@@ -19,12 +19,10 @@ don't:
 WASM/node and native/cc legs skip cleanly when the toolchain is absent,
 following the test_stdlib2.py pattern.
 
-KNOWN LIMIT (Alpha 31, see niko2/KNOWN_LIMITATIONS.md): the WASM backend
-miscompiles string indexing inside `while yes:` loops on strings
-containing multibyte UTF-8, so json.parse of a JSON string with raw
-multibyte characters fails on WASM while VM/native succeed. Those cases
-assert VM/native success and WASM failure explicitly; if the backend bug
-is fixed, the WASM assertions here must be flipped to success.
+Fixed in Alpha 33 (see niko2/KNOWN_LIMITATIONS.md): the WASM backend's
+item_of passed the char count where the byte length was needed, so
+indexing the last character(s) of multibyte text returned "". The
+unicode round-trip now succeeds on all three backends.
 """
 import os
 import pathlib
@@ -216,13 +214,11 @@ with tempfile.TemporaryDirectory() as t:
         assert by_name['native'] == (0, 'yes\n'), \
             f'unicode round-trip [native]: {by_name["native"]!r}'
     if 'wasm' in by_name:
-        code, out = by_name['wasm']
-        # KNOWN LIMIT (Alpha 31): WASM `while yes:` + string indexing on
-        # multibyte text panics/misparses the host -- parse fails here
-        # while VM/native succeed. Flip to (0, 'yes\\n') when fixed.
-        assert code != 0, f'unicode round-trip [wasm] unexpectedly passed: {out!r}'
-        print(f'ok: unicode round-trip fails on WASM as documented '
-              f'(known backend limit): {out.strip()[:80]!r}')
+        # Fixed in Alpha 33 (WASM item_of byte-length bug): the unicode
+        # round-trip now succeeds on WASM like VM/native.
+        assert by_name['wasm'] == (0, 'yes\n'), \
+            f'unicode round-trip [wasm]: {by_name["wasm"]!r}'
+        print('ok: unicode round-trip succeeds on WASM too (Alpha 33 fix)')
     print('ok: round-trip battery green')
 
     # -- 6. deep nesting (50 levels) ----------------------------------------

@@ -558,3 +558,20 @@ match cases in `tests/test_formatter.py`.
 - Never claim a feature complete until it is implemented **and** tested.
 - Keep the Niko 1 engines (`niko.py`, `niko-ide.html`) behaving the same;
   their 26-case suite must stay green.
+- **Alpha 33 is complete**: WASM multibyte string indexing fix — the
+  bug Alpha 31's `json` testing found. Root cause in
+  `niko2/backends/wasm.py` `_b_item_of`: the text branch overwrote the
+  byte-length local with the char count from `utf8_len`, then passed it
+  as the byte-length argument to `utf8_byte_offset`, so `item_of` on the
+  last character(s) of multibyte text returned `""` instead of the
+  character; a `while yes:` scan-to-terminator loop (what `json.niko`'s
+  parser does) then never matched its terminator and the host panicked
+  with `string index out of range`. Fix (3 lines, WASM only): the byte
+  length keeps its own local `blen`, passed to both `utf8_byte_offset`
+  calls; the other six call sites audited, all already correct. No
+  host-contract change. Tests: new `tests/test_wasm_unicode.py` (20
+  cases, 3-way differential); `tests/test_json.py` WASM unicode
+  round-trip flipped to success. Docs: `KNOWN_LIMITATIONS.md` Alpha 31
+  entry marked fixed-in-Alpha-33, `json.niko` header updated,
+  `STDLIB.md` regenerated. Full suite green. See
+  `RELEASE_NOTES_ALPHA33.md` / `ALPHA33_DESIGN.md`.

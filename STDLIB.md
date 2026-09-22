@@ -444,13 +444,10 @@ Known limitations:
 - \uXXXX escapes above U+007F are not supported by parse; they are a
 
 ```niko
-parse error naming the character position. On the VM and native
-backends you can write such characters as raw UTF-8 instead (JSON
-allows it); on WASM, parsing a JSON string that contains raw
-multibyte UTF-8 fails -- a WASM backend bug (`while yes:` loops
-miscompile string indexing on multibyte text, see
-niko2/KNOWN_LIMITATIONS.md). stringify of multibyte text works on
-all three backends.
+parse error naming the character position. Write such characters as
+raw UTF-8 instead (JSON allows it); raw multibyte UTF-8 parses on
+all three backends. stringify of multibyte text works on all three
+backends too.
 ```
 
 - Numbers with magnitude >= 1e15 are rejected with "number out of
@@ -722,8 +719,7 @@ Output: `A`
 Decode the four hex digits at cur["pos"] (the \u was already consumed);
 leaves cur["pos"] just past the digits. Only U+0000..U+007F (ASCII) are
 supported; anything higher is a parse error naming the position of the
-\u. (The WASM backend cannot hold multibyte characters in longer
-strings, so \u0080 and above are rejected on every backend to stay
+\u. (\u0080 and above are rejected on every backend to stay
 byte-identical; write such characters as raw UTF-8 instead.)
 
 ```niko
