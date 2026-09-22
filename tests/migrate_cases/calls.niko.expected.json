@@ -1,0 +1,22 @@
+[
+ [
+  1,
+  "error",
+  "ask-call"
+ ],
+ [
+  2,
+  "error",
+  "remove-call"
+ ],
+ [
+  3,
+  "error",
+  "random-call"
+ ],
+ [
+  4,
+  "error",
+  "range-call"
+ ]
+]

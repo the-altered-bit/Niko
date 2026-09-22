@@ -1,0 +1,32 @@
+[
+ [
+  1,
+  "warning",
+  "text-render"
+ ],
+ [
+  2,
+  "warning",
+  "round-half"
+ ],
+ [
+  3,
+  "warning",
+  "now-format"
+ ],
+ [
+  4,
+  "warning",
+  "split-empty"
+ ],
+ [
+  5,
+  "warning",
+  "item-zero"
+ ],
+ [
+  7,
+  "warning",
+  "list-index"
+ ]
+]

@@ -1,0 +1,12 @@
+[
+ [
+  2,
+  "error",
+  "not-boolean"
+ ],
+ [
+  2,
+  "warning",
+  "not-is-in"
+ ]
+]

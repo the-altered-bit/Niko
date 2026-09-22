@@ -1,0 +1,4 @@
+set name to ask("Name?")
+remove([1, 2], 1)
+set r to random(1, 10)
+set xs to range(1, 5)

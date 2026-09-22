@@ -223,3 +223,27 @@ and left untouched; a missing file is a plain-English error. CRLF line
 endings are normalized to LF (matching what the editor already did).
 `niko2 format <file>` still prints one file's formatted source to
 stdout. See `RELEASE_NOTES_ALPHA34.md` / `ALPHA34_DESIGN.md`.
+
+## Niko 2 Alpha 35 — `niko2 migrate`, the Niko 1 → Niko 2 migration advisor
+
+Niko 2 is deliberately not Niko 1 (real grammar, typechecker, no Python
+fallthrough), so `niko2 migrate` answers *what do I have to change?* A
+two-phase analyzer — heuristic scan of 40 Niko 1 idioms plus Niko 2's own
+parser + typechecker — reports every divergence with a line number, a
+severity, and a pointer into the new `MIGRATION_GUIDE.md` catalog:
+
+```bash
+niko2 migrate program.niko              # report: errors, warnings, notes
+niko2 migrate --fix program.niko        # apply the safe rewrites in place
+niko2 migrate --fix --stdout prog.niko  # fixed source to stdout, report to stderr
+```
+
+Exit 1 when errors remain, 0 when only warnings/notes remain, 2 on
+usage/IO errors. If Niko 2 accepts the file outright, heuristic errors
+are dropped as false positives (a clean check is ground truth). `--fix`
+only applies semantics-preserving rewrites (repeat-forever, ask/remove/
+random/range call forms, bare `in`, `=`, hex, `//`, `say "a" "b"`,
+`set d.k`, `join(l)`, bare `for`, `+=`, `not x is in y`); everything
+semantic — `if name:`, `use mylib`, global writes — is reported for a
+human to decide. The guide's §8 states the advisor-vs-transpiler
+contract. See `RELEASE_NOTES_ALPHA35.md` / `ALPHA35_DESIGN.md`.

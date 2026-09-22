@@ -1,0 +1,7 @@
+set name to "ada"
+if name:
+  say "hi"
+while name:
+  set name to ""
+if "x":
+  say "lit"

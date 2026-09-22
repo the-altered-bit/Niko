@@ -1,0 +1,7 @@
+x = 5
+y = 0x1F
+z = 7 // 2
+for i in [1, 2]:
+  say i
+import os
+say f"{x}"

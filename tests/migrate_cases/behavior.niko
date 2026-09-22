@@ -1,0 +1,7 @@
+set t to text(42)
+set n to round(2.5)
+say now()
+set parts to split("abc", "")
+set first to item 0 of [1, 2]
+set xs to [10, 20]
+set x to xs[1]

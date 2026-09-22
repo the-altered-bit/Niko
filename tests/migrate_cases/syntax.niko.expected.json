@@ -1,0 +1,32 @@
+[
+ [
+  1,
+  "error",
+  "repeat-forever"
+ ],
+ [
+  3,
+  "error",
+  "in-operator"
+ ],
+ [
+  5,
+  "error",
+  "say-adjacent"
+ ],
+ [
+  7,
+  "error",
+  "set-dotted"
+ ],
+ [
+  8,
+  "error",
+  "join-arity"
+ ],
+ [
+  8,
+  "warning",
+  "join-render"
+ ]
+]

@@ -1,0 +1,7 @@
+set total to 0
+to bump with n:
+  add n to total
+  set total to total + n
+say total
+to helper with total:
+  set total to 99

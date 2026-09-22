@@ -596,3 +596,23 @@ match cases in `tests/test_formatter.py`.
   tests/, examples/, niko2/stdlib/, plus CLI behavior tests). README
   gained an Alpha 34 section. Full suite green. See
   `RELEASE_NOTES_ALPHA34.md` / `ALPHA34_DESIGN.md`.
+- **Alpha 35 is complete**: `niko2 migrate` — the Niko 1 → Niko 2
+  migration advisor (`niko2/migrate.py`). Two-phase analysis: heuristic
+  line scan of 40 Niko 1 idioms (Niko-1-faithful lexing, strings masked)
+  plus Niko 2's own parser + typechecker with first-diagnostic mapping;
+  a clean check drops heuristic errors as false positives (except
+  `use-python` and `join-arity`, which the checker can't see). Findings
+  are (line, severity, code, message, fix-or-None) with a guide-section
+  pointer into the new `MIGRATION_GUIDE.md` difference catalog.
+  `migrate --fix` applies only semantics-preserving rewrites via a
+  bounded fixpoint with idempotency guards; exit 1 on errors, 0 on
+  warnings/notes only, 2 on usage/IO errors. The differential audit also
+  documented three new divergences in `niko2/KNOWN_LIMITATIONS.md`
+  (silent `use <python-lib>`, function-global writes, one unverified
+  truthiness question) and fixed four tool bugs along the way. Tests:
+  `tests/migrate_cases/` (12 fixtures + pinned `.expected.json` + 4
+  `.fixed.niko`) and `tests/test_migrate.py` (pinned findings, fix
+  round-trip + idempotency, CLI exit codes, zero errors over
+  `tests/niko2_cases/` + `niko2/stdlib/`, Niko 1 spot checks). README
+  gained an Alpha 35 section. Full suite green. See
+  `RELEASE_NOTES_ALPHA35.md` / `ALPHA35_DESIGN.md`.

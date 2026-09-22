@@ -1,0 +1,7 @@
+set x to 5
+set y to 31
+set z to floor(7 / 2)
+for each i in [1, 2]:
+  say i
+import os
+say f"{x}"

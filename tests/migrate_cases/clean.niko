@@ -1,0 +1,5 @@
+set name to "ada"
+if name is not "":
+  say "hi " + name
+for each n in niko_range(1, 3):
+  say n

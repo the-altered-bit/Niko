@@ -1,0 +1,8 @@
+repeat forever:
+  say "loop"
+if 1 in [1]:
+  say "in"
+say "a" "b"
+set d to {"k": 1}
+set d.k to 2
+set j to join([1, 2])

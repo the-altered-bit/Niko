@@ -507,3 +507,32 @@ multibyte text was correct on WASM. `tests/test_json.py` asserted the
 WASM failure explicitly (commented "flip when fixed"); the assertion is
 now flipped to success, and `tests/test_wasm_unicode.py` pins the fix
 3-way.
+
+## Niko 1 -> Niko 2 divergences found during the Alpha 35 audit (2026-09-22)
+
+A line-by-line audit of `niko.py` against `niko2/`, verified with ~70
+differential probes on the VM, turned up three divergences that were not
+previously documented. All three are covered in `MIGRATION_GUIDE.md` and
+detected by `niko2 migrate`.
+
+1. **`use <python-lib>` is silently ignored.** Niko 1's `use math` means
+   `import math`. Niko 2's `use` only includes other Niko files, so
+   `use math` parses and typechecks cleanly but imports nothing -- the
+   program then fails later with `unknown name` (or worse, silently does
+   without the library). This is the most dangerous item in the
+   migration guide precisely because nothing fails at the `use` line.
+   `niko2 migrate` reports it as `[use-python]` (an error), with a
+   per-library replacement suggestion.
+2. **Functions cannot write top-level variables.** Niko 1 functions wrote
+   through to top-level variables (`globals()["x"]`); on Niko 2, `set` /
+   `ask ... into` / `for each` / `add ... to` / `take ... from` inside a
+   function always create or update a function-local. The top-level
+   variable silently keeps its old value -- verified: Niko 1 prints `7`,
+   Niko 2 prints `0` for `tests/cases/globals.niko`. In-place mutation
+   (`put`, `remove`, `set item`, indexed `set`) still reaches the shared
+   object in both. `niko2 migrate` reports this as `[global-write]`
+   (a warning).
+3. **`result` truthiness across backends (unverified).** The audit
+   flagged a possible VM/native split in how `result` values behave in
+   boolean position, but this was not confirmed differentially -- it
+   needs a dedicated probe before it can be documented as fact.

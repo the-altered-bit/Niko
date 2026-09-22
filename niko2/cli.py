@@ -150,11 +150,52 @@ def cmd_fmt(files,check_only):
         return 1
     return 1 if failed else 0
 
+# Alpha 35: `niko2 migrate [--fix] [--stdout] <file.niko>` -- Niko 1 -> Niko 2
+# migration advisor. Reports every construct from MIGRATION_GUIDE.md; --fix
+# applies the mechanical rewrites in place (like `fmt`) and re-analyzes.
+# Exit 0 when no errors remain, 1 when errors remain, 2 on usage/IO errors.
+def cmd_migrate(file,fix=False,to_stdout=False):
+    from .migrate import analyze_source,apply_fixes,format_finding,summarize
+    if not file:
+        print('Usage: niko2 migrate [--fix] [--stdout] <file.niko>'); return 2
+    try:
+        src=Path(file).read_text(encoding='utf8')
+    except OSError as e:
+        print(f'Niko error: cannot read {file}: {e.strerror or e}'); return 2
+    findings=analyze_source(src,file)
+    applied=[]
+    if fix:
+        new_src,applied=apply_fixes(src,findings)
+        if new_src!=src:
+            if to_stdout:
+                sys.stdout.write(new_src)
+            else:
+                try:
+                    Path(file).write_text(new_src,encoding='utf8')
+                except OSError as e:
+                    print(f'Niko error: cannot write {file}: {e.strerror or e}'); return 2
+            findings=analyze_source(new_src,file)
+        elif to_stdout:
+            sys.stdout.write(new_src)
+    out=sys.stderr if (fix and to_stdout) else sys.stdout
+    for f in findings:
+        print(format_finding(file,f),file=out)
+    n=summarize(findings)
+    if applied:
+        print(f'applied automatic fixes: {", ".join(applied)}',file=out)
+    if not findings:
+        print(f'{file}: no migration issues found.',file=out)
+    else:
+        print(f'{file}: {n["error"]} error(s), {n["warning"]} warning(s), {n["note"]} note(s). See MIGRATION_GUIDE.md.',file=out)
+    return 1 if n['error'] else 0
+
 def main():
     ap=argparse.ArgumentParser(prog='niko2',description='Niko 2 compiler/interpreter')
-    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','fmt','deps','lock','get','publish','lsp','debug','wasm','native','repl','test'])
+    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','fmt','deps','lock','get','publish','lsp','debug','wasm','native','repl','test','migrate'])
     ap.add_argument('file',nargs='?')
     ap.add_argument('--check',action='store_true',help='(fmt) do not write files; exit 1 if any input would be reformatted')
+    ap.add_argument('--fix',action='store_true',help='(migrate) apply the mechanical fixes in place, then re-analyze')
+    ap.add_argument('--stdout',action='store_true',help='(migrate) with --fix, write the fixed source to stdout instead of the file (report goes to stderr)')
     ap.add_argument('--force',action='store_true',help='(get/publish) reinstall the package even if it is already cached/published')
     ap.add_argument('--update',action='store_true',help='(get) re-resolve a registry package to the newest matching version and upgrade the install + lockfile pin')
     ap.add_argument('--registry',help='(publish) registry directory or index URL; default from NIKO_REGISTRY or ~/.niko/config.toml')
@@ -179,6 +220,14 @@ def main():
     if argv[:1]==['fmt']:
         fmt_files=[x for x in argv[1:] if not x.startswith('-')]
         argv=[argv[0]]+[x for x in argv[1:] if x.startswith('-')]
+    # Alpha 35: `niko2 migrate --fix <file>` hits the same quirk (an option
+    # between the two positionals breaks parsing). Hoist migrate's flags
+    # out of argv before argparse sees them.
+    migrate_fix=migrate_stdout=False
+    if argv[:1]==['migrate']:
+        if '--fix' in argv: migrate_fix=True
+        if '--stdout' in argv: migrate_stdout=True
+        argv=[argv[0]]+[x for x in argv[1:] if x not in ('--fix','--stdout')]
     a=ap.parse_args(argv)
     a.update=a.update or update_requested
     if a.command=='lsp':
@@ -216,6 +265,9 @@ def main():
     # Alpha 34: `niko2 fmt` -- the editor formatter on the command line.
     if a.command=='fmt':
         return cmd_fmt(fmt_files,check_only=a.check)
+    # Alpha 35: `niko2 migrate` -- Niko 1 -> Niko 2 migration advisor.
+    if a.command=='migrate':
+        return cmd_migrate(a.file,fix=(a.fix or migrate_fix),to_stdout=(a.stdout or migrate_stdout))
     if a.command=='deps':
         root=find_project_root(a.file or '.')
         graph=collect_project_dependencies(root)
