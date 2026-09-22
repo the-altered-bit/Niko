@@ -9,6 +9,10 @@
  *   node e2e.mjs            # run from examples/playground/
  *   NIKO_CHROME=/path/to/chrome node e2e.mjs   # override the Chrome binary
  *
+ * Needs Node 18+ and a Chrome/Chromium binary. No npm dependencies: the
+ * CDP client speaks WebSocket over a raw socket (Node < 21 has no WebSocket
+ * global).
+ *
  * Exit codes: 0 = pass; 2 = Pyodide CDN unreachable (skip, NOT a pass);
  * anything else = real failure with a message on stderr.
  *
@@ -39,6 +43,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
 
 const CHROME = process.env.NIKO_CHROME || "/opt/meta-chromium/chrome";
 const PYODIDE_JS = "https://cdn.jsdelivr.net/pyodide/v0.29.1/full/pyodide.js";
@@ -202,6 +207,141 @@ function freePort() {
   });
 }
 
+/* ---------------- minimal WebSocket client (no deps) ----------------
+ * Node < 21 has no global WebSocket. CDP only needs text frames on ws://,
+ * so this implements just that: HTTP upgrade handshake, masked client
+ * frames, ping/pong, close. Same handler style as the browser WebSocket
+ * (onopen/onmessage({data})/onerror/onclose) so CDP below is unchanged.
+ */
+class WS {
+  constructor(url) {
+    this.u = new URL(url);
+    this.onopen = null;
+    this.onmessage = null;
+    this.onerror = null;
+    this.onclose = null;
+    this.buf = Buffer.alloc(0);
+    this.connected = false;
+  }
+  connect() {
+    return new Promise((resolve, reject) => {
+      const key = crypto.randomBytes(16).toString("base64");
+      const port = this.u.port ? +this.u.port : 80;
+      const target = `${this.u.pathname}${this.u.search}`;
+      const sock = net.createConnection(
+        { host: this.u.hostname, port },
+        () => {
+          sock.write(
+            `GET ${target} HTTP/1.1\r\n` +
+              `Host: ${this.u.hostname}:${port}\r\n` +
+              `Upgrade: websocket\r\n` +
+              `Connection: Upgrade\r\n` +
+              `Sec-WebSocket-Key: ${key}\r\n` +
+              `Sec-WebSocket-Version: 13\r\n\r\n`
+          );
+        }
+      );
+      this.sock = sock;
+      let settled = false;
+      const done = (fn, v) => {
+        if (!settled) {
+          settled = true;
+          fn(v);
+        }
+      };
+      sock.on("error", (e) => {
+        if (this.onerror) this.onerror(e);
+        done(reject, e);
+      });
+      sock.on("close", () => {
+        if (this.onclose) this.onclose();
+      });
+      sock.on("data", (d) => {
+        this.buf = Buffer.concat([this.buf, d]);
+        if (!this.connected) {
+          const i = this.buf.indexOf("\r\n\r\n");
+          if (i < 0) return;
+          const head = this.buf.slice(0, i).toString("latin1");
+          this.buf = this.buf.slice(i + 4);
+          if (!/^HTTP\/1\.1 101 /m.test(head)) {
+            done(reject, new Error("WS upgrade failed: " + head.split("\r\n")[0]));
+            return;
+          }
+          this.connected = true;
+          if (this.onopen) this.onopen();
+          done(resolve);
+        }
+        while (this.buf.length >= 2) {
+          const b0 = this.buf[0];
+          const b1 = this.buf[1];
+          const opcode = b0 & 0x0f;
+          let len = b1 & 0x7f;
+          let off = 2;
+          if (len === 126) {
+            if (this.buf.length < 4) return;
+            len = this.buf.readUInt16BE(2);
+            off = 4;
+          } else if (len === 127) {
+            if (this.buf.length < 10) return;
+            len = Number(this.buf.readBigUInt64BE(2));
+            off = 10;
+          }
+          const masked = (b1 & 0x80) !== 0;
+          let mask = null;
+          if (masked) {
+            if (this.buf.length < off + 4) return;
+            mask = this.buf.slice(off, off + 4);
+            off += 4;
+          }
+          if (this.buf.length < off + len) return;
+          const payload = this.buf.slice(off, off + len);
+          if (mask) for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
+          this.buf = this.buf.slice(off + len);
+          if (opcode === 0x8) {
+            sock.end();
+            return;
+          }
+          if (opcode === 0x9) {
+            this._frame(0xa, payload);
+            continue;
+          }
+          if (opcode === 0x1 && this.onmessage) this.onmessage({ data: payload.toString("utf8") });
+        }
+      });
+    });
+  }
+  _frame(opcode, data) {
+    const payload = Buffer.isBuffer(data) ? data : Buffer.from(data);
+    const mask = crypto.randomBytes(4);
+    const head = [0x80 | opcode];
+    if (payload.length < 126) head.push(0x80 | payload.length);
+    else if (payload.length < 65536) head.push(0x80 | 126);
+    else head.push(0x80 | 127);
+    const parts = [Buffer.from(head)];
+    if (payload.length >= 126 && payload.length < 65536) {
+      const b = Buffer.alloc(2);
+      b.writeUInt16BE(payload.length);
+      parts.push(b);
+    } else if (payload.length >= 65536) {
+      const b = Buffer.alloc(8);
+      b.writeBigUInt64BE(BigInt(payload.length));
+      parts.push(b);
+    }
+    parts.push(mask);
+    const masked = Buffer.from(payload);
+    for (let i = 0; i < masked.length; i++) masked[i] ^= mask[i % 4];
+    parts.push(masked);
+    this.sock.write(Buffer.concat(parts));
+  }
+  send(data) {
+    this._frame(0x1, data);
+  }
+  close() {
+    this._frame(0x8, Buffer.alloc(0));
+    this.sock.end();
+  }
+}
+
 /* ---------------- minimal CDP client ---------------- */
 class CDP {
   constructor(url) {
@@ -211,7 +351,8 @@ class CDP {
   }
   connect() {
     return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.url);
+      this.ws = new WS(this.url);
+      this.ws.connect().catch(() => {});
       this.ws.onopen = () => resolve();
       this.ws.onerror = (e) => reject(new Error("CDP ws error: " + e.message));
       this.ws.onmessage = (ev) => {
