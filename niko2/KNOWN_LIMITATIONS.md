@@ -174,8 +174,12 @@ it's formatting/diagnosing is closer to feature-complete.
   names out of the Locals view, but expression evaluation (not yet
   implemented) must not expose it.
 - **The VS Code extension is not on the Marketplace.** Install
-  `editors/vscode/niko-0.7.0.vsix` via *Extensions: Install from
-  VSIX…*.
+  `editors/vscode/niko-0.25.0.vsix` via *Extensions: Install from
+  VSIX…*. The extension was refreshed in Alpha 25 (grammar current
+  through Alpha 25, multi-file debugging, conditional breakpoints,
+  evaluate, module-aware diagnostics); the publish runbook is
+  `editors/vscode/PUBLISH.md` — publishing needs the user's publisher
+  account and token.
 - Future debugger work: data breakpoints / logpoints. (The old
   `use`-import item is done — Alpha 22 routes `use` through the module
   pipeline, so breakpoints, stepping, and frames work inside used

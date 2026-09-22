@@ -1,1 +1,93 @@
-{"categories":["Programming Languages"],"contributes":{"configuration":{"properties":{"niko.pythonPath":{"default":"python3","description":"Python used to run the Niko language server and debug adapter (`python -m niko2 lsp|debug`). The niko2 package must be importable.","type":"string"}},"title":"Niko"},"debuggers":[{"configurationAttributes":{"launch":{"properties":{"program":{"description":"The .niko file to debug.","type":"string"},"stopOnEntry":{"default":false,"description":"Pause on the first line.","type":"boolean"}},"required":["program"]}},"initialConfigurations":[{"name":"Debug current Niko file","program":"${file}","request":"launch","type":"niko"}],"label":"Niko Debug","languages":["niko"],"type":"niko"}],"grammars":[{"language":"niko","path":"./syntaxes/niko.tmLanguage.json","scopeName":"source.niko"}],"languages":[{"aliases":["Niko","niko"],"configuration":"./language-configuration.json","extensions":[".niko"],"id":"niko"}]},"description":"Niko language support: syntax highlighting, language server (diagnostics, completion, hover, go-to-definition, formatting) and debugging.","displayName":"Niko","engines":{"vscode":"^1.80.0"},"license":"MIT","main":"./client/extension.js","name":"niko","publisher":"niko-lang","scripts":{"package":"vsce package"},"version":"0.7.0"}
+{
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "configuration": {
+      "properties": {
+        "niko.pythonPath": {
+          "default": "python3",
+          "description": "Python used to run the Niko language server and debug adapter (`python -m niko2 lsp|debug`). The niko2 package must be importable.",
+          "type": "string"
+        }
+      },
+      "title": "Niko"
+    },
+    "debuggers": [
+      {
+        "configurationAttributes": {
+          "launch": {
+            "properties": {
+              "program": {
+                "description": "The .niko file to debug.",
+                "type": "string"
+              },
+              "stopOnEntry": {
+                "default": false,
+                "description": "Pause on the first line.",
+                "type": "boolean"
+              },
+              "inputTimeout": {
+                "type": "number",
+                "default": 30,
+                "description": "Seconds the debugger waits for an answer to a Niko-specific reverse `input` request (used by `ask`) before yielding \"\". Stock VS Code does not answer reverse `input` requests, so `ask` yields \"\" after this timeout."
+              }
+            },
+            "required": [
+              "program"
+            ]
+          }
+        },
+        "initialConfigurations": [
+          {
+            "name": "Debug current Niko file",
+            "program": "${file}",
+            "request": "launch",
+            "type": "niko"
+          }
+        ],
+        "label": "Niko Debug",
+        "languages": [
+          "niko"
+        ],
+        "type": "niko"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "niko",
+        "path": "./syntaxes/niko.tmLanguage.json",
+        "scopeName": "source.niko"
+      }
+    ],
+    "languages": [
+      {
+        "aliases": [
+          "Niko",
+          "niko"
+        ],
+        "configuration": "./language-configuration.json",
+        "extensions": [
+          ".niko"
+        ],
+        "id": "niko"
+      }
+    ]
+  },
+  "description": "Niko language support: syntax highlighting, multi-file language server (diagnostics, completion, hover, go-to-definition, formatting across modules and packages) and multi-file DAP debugging with conditional breakpoints and expression evaluation.",
+  "displayName": "Niko",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "license": "MIT",
+  "main": "./client/extension.js",
+  "activationEvents": [
+    "onLanguage:niko"
+  ],
+  "name": "niko",
+  "publisher": "niko-lang",
+  "scripts": {
+    "package": "vsce package"
+  },
+  "version": "0.25.0"
+}

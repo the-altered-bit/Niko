@@ -62,7 +62,7 @@ match cases in `tests/test_formatter.py`.
 - **Alpha 7 is complete**: `niko2 lsp` (LSP server: diagnostics, completion,
   hover, go-to-definition, formatting), `editors/vscode/` (TextMate grammar,
   language client, DAP debug type; packaged `niko-0.7.0.vsix`, not on the
-  Marketplace yet), `niko2 debug` (DAP adapter; VM `trace_fn` hook is
+  Marketplace yet — see Alpha 25), `niko2 debug` (DAP adapter; VM `trace_fn` hook is
   off-by-default). Tests: `tests/test_lsp.py`, `tests/test_dap.py`,
   `editors/vscode/test-grammar.js`. Limits: single-file debugging, no `ask`
   under the debugger, line-oriented hover/definition.
@@ -278,6 +278,31 @@ match cases in `tests/test_formatter.py`.
   Alpha 24 sections (hermetic HTTP fixture on 127.0.0.1); worked example
   `examples/registry-http/` (publish → serve → get → lock → run).
   Full suite green. See `RELEASE_NOTES_ALPHA24.md` / `ALPHA24_DESIGN.md`.
+- **Alpha 25 is complete**: VS Code extension refresh + Marketplace
+  publish prep. The extension was packaged once as `niko-0.7.0.vsix` in
+  Alpha 7 and had gone stale; it's now `niko-0.25.0.vsix` (version marks
+  it current through Alpha 25; publisher `niko-lang`, id `niko`
+  unchanged). Grammar audited against the parser/checker: added
+  `put`/`remove`/`add`/`take`, `from`/`into`, the long-form comparison
+  operators (`is bigger than` … `is in`, longest-first), single-quoted
+  strings; the builtin list is verified programmatically against
+  `BUILTIN_NAMES`. `test-grammar.js` gained 17 cases + a builtin-sync
+  self-check. `package.json` description sells the real feature set;
+  added the `inputTimeout` launch attribute and `activationEvents`
+  (modern `vsce` requires it). README fixed (the stale "`use` imports
+  are not loaded under the debugger" line, accurate feature list, the
+  `ask`-under-VS-Code caveat, new vsix filename). New
+  `editors/vscode/PUBLISH.md` runbook — publishing itself needs the
+  user's publisher account + token, so it stays a user action. The old
+  `niko-0.7.0.vsix` is removed. Verified: grammar tests green; scripted
+  LSP session (exact `python3 -m niko2 lsp` command) over a multi-file
+  program — diagnostics, cross-file hover, go-to-definition, formatting;
+  scripted DAP session (exact `python3 -m niko2 debug` command) —
+  conditional breakpoint, cross-file frames, evaluate, `ask` yielding
+  `""` after the unanswered reverse `input` timeout; one clean headless
+  VS Code run (later headless runs SIGSEGV'd inside the Electron binary
+  itself — a container issue). Full suite green. See
+  `RELEASE_NOTES_ALPHA25.md`.
 - **Alpha 19 is complete**: package registry + version-range solving.
   `niko2/semver.py` (range grammar: `*`, exact, partials, npm-style
   `^`/`~`, comparators, comma AND; `max_satisfying` solver,
