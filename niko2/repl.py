@@ -39,8 +39,13 @@ Documented limits:
     quote-parity heuristic (no full string parsing).
   - Multi-line constructs must be typed with increasing indentation;
     the REPL cannot know a block is closed except by blank line/dedent.
-  - ``:reset`` drops the VM, the globals and all history; there is no
-    undo for a single chunk.
+  - ``:reset`` drops the VM, the globals and all history. ``:undo``
+    drops just the last accepted chunk and rebuilds the session from
+    the rest (as if the undone chunk had never been typed); there is
+    no redo. Undo rebuilds interpreter state only: side effects
+    outside the VM are replayed, not rewound (a kept chunk that
+    writes a file writes it again; a kept chunk using ``ask`` prompts
+    again during the rebuild).
   - Redefining a function replaces its nested helpers session-wide: a
     reference to the old function saved earlier resolves nested names to
     the newest definitions.
@@ -50,14 +55,17 @@ Documented limits:
 # How REPL session state works (persistence approach).
 #
 # The REPL keeps every successfully parsed+typechecked chunk in
-# `src_parts` (the *effective* source: a bare expression the user typed is
-# stored as a synthetic `set __repl_echo_N to (<expr>)` line so it
-# typechecks like any other statement). Before a new chunk runs, the whole
-# accumulated source is parsed and typechecked again -- parse(src) for the
-# program shape, then either check() (no imports) or the module pipeline
-# (build_module_graph + per-unit checking + desugar_imports) when the
-# session uses `import ... as ...`. This gives every chunk full knowledge
-# of earlier definitions with no new syntax and no parser changes.
+# `src_parts` as (user_text, effective) pairs -- the *effective* source
+# for a bare expression the user typed is a synthetic
+# `set __repl_echo_N to (<expr>)` line so it typechecks like any other
+# statement, while the user text is kept so `:undo` can replay the
+# session exactly as typed. Before a new chunk runs, the whole
+# accumulated effective source is parsed and typechecked again --
+# parse(src) for the program shape, then either check() (no imports) or
+# the module pipeline (build_module_graph + per-unit checking +
+# desugar_imports) when the session uses `import ... as ...`. This gives
+# every chunk full knowledge of earlier definitions with no new syntax
+# and no parser changes.
 #
 # Only the *delta* is compiled and executed: the desugared program is
 # always [M result-slot pre-declares][M module wrappers][M init calls]
@@ -71,9 +79,18 @@ Documented limits:
 # drops them. A chunk that parses and typechecks joins the history even if
 # it fails at runtime (like a script that crashes: earlier statements took
 # effect); parse/type errors are rejected and never recorded.
+#
+# `:undo` pops the last pair and rebuilds: reset() back to a fresh VM,
+# env and function table, then re-run the kept user chunks in order with
+# stdout suppressed. The rebuild re-derives echo names (__repl_echo_N)
+# and cumulative line numbers from the kept chunks, and each kept
+# import/use initializes its module exactly once, so the rebuilt session
+# behaves as if the undone chunk had never been typed.
 # ---------------------------------------------------------------------------
 
 from pathlib import Path
+import contextlib
+import io
 
 from .parser import parse, parse_expr, ParseError
 from .ast import Program
@@ -109,7 +126,8 @@ Commands:
   :help    show this help
   :quit    leave the REPL (Ctrl-D works too)
   :exit    same as :quit
-  :reset   forget everything typed so far"""
+  :reset   forget everything typed so far
+  :undo    drop the last chunk (as if it was never typed)"""
 
 
 def _indent_of(line):
@@ -185,7 +203,7 @@ class ReplSession:
         self.reset()
 
     def reset(self):
-        self.src_parts = []            # effective source chunks, in order
+        self.src_parts = []            # (user text, effective source) chunks
         self.entry_count = 0           # top-level stmts across src_parts
         self.initialized_modules = set()  # str(path) of modules already run
         self.env = {}
@@ -274,8 +292,44 @@ class ReplSession:
             self.reset()
             print('Session cleared.')
             return None
+        if name == 'undo':
+            self.undo()
+            return None
         print(f"Unknown command '{cmd}'. Type :help for the list of commands.")
         return None
+
+    # -- undo ----------------------------------------------------------
+
+    def undo(self):
+        """Drop the last accepted chunk and rebuild the session.
+
+        The kept chunks are re-run in order on a fresh VM and globals
+        dict with their output suppressed, so the session behaves
+        exactly as if the undone chunk had never been typed: module
+        wrappers re-initialize once per the kept chunks (init-once
+        preserved), echo names (``__repl_echo_N``) and cumulative line
+        numbers are re-derived from the kept chunks, and names defined
+        only by the undone chunk disappear. A kept chunk that somehow
+        fails to replay (possible only if a module file changed under
+        the session) is counted and reported rather than killing the
+        session.
+        """
+        if not self.src_parts:
+            print('Nothing to undo.')
+            return
+        user_text, _ = self.src_parts.pop()
+        kept = [u for u, _ in self.src_parts]
+        self.reset()
+        failed = 0
+        with contextlib.redirect_stdout(io.StringIO()):
+            for chunk in kept:
+                if not self.exec_chunk(chunk):
+                    failed += 1
+        preview = user_text.strip().splitlines()[0][:60]
+        print(f'Undid chunk: {preview}')
+        if failed:
+            print(f'Warning: {failed} kept chunk(s) did not replay; '
+                  f'session state may be incomplete.')
 
     # -- execution -----------------------------------------------------
 
@@ -317,7 +371,7 @@ class ReplSession:
         else:
             effective = chunk
 
-        check_src = '\n'.join(self.src_parts + [effective])
+        check_src = '\n'.join([eff for _, eff in self.src_parts] + [effective])
         try:
             entry_tree = parse(check_src)
         except ParseError as e:
@@ -368,8 +422,10 @@ class ReplSession:
             print(f'Niko error: internal {type(e).__name__}: {e}')
 
         # Parse+check passed, so the chunk joins the history even if it
-        # failed at runtime (script-that-crashed semantics).
-        self.src_parts.append(effective)
+        # failed at runtime (script-that-crashed semantics). The raw
+        # user text is kept alongside the effective source so `:undo`
+        # can replay the session exactly as typed.
+        self.src_parts.append((chunk, effective))
         self.entry_count = len(entry_stmts)
 
         if is_echo:

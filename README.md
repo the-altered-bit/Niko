@@ -94,7 +94,8 @@ value printed (`nothing` is never echoed). `import "path/to/file.niko"
 as alias` works as in scripts — relative paths resolve against the
 directory where you started the REPL, and each module initializes once
 per session. Commands: `:help`, `:quit` / `:exit`, `:reset` (forgets
-everything). Ctrl-D leaves; Ctrl-C discards the current block.
+everything), `:undo` (drops the last chunk, as if it was never typed).
+Ctrl-D leaves; Ctrl-C discards the current block.
 
 ## Niko 2 Alpha 23 — module-aware editor diagnostics
 

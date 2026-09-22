@@ -552,3 +552,190 @@ try:
         client4.close()
 finally:
     shutil.rmtree(fixture23, ignore_errors=True)
+
+
+# --- Alpha 26: LSP diagnostics mtime cache ------------------------------
+# In-process: re-parse counts are server-internal state, not visible over
+# stdio, so this drives `_analyze` + `_ModuleTreeCache` directly. The
+# fixture is main -> {a -> leaf, b}; the leaf's downstream is a (and the
+# entry), b is unrelated to the leaf.
+sys.path.insert(0, str(root))
+from niko2 import lsp as _lsp
+from niko2.parser import parse as _parse
+
+fixture26 = tempfile.mkdtemp(prefix='niko-lsp-a26-')
+try:
+    proj = pathlib.Path(fixture26) / 'proj'
+    (proj / 'lib').mkdir(parents=True)
+    leaf = proj / 'lib' / 'leaf.niko'
+    moda = proj / 'lib' / 'a.niko'
+    modb = proj / 'lib' / 'b.niko'
+    leaf.write_text('set v to 1\n', encoding='utf8')
+    moda.write_text('import "leaf.niko" as leaf\nset x to leaf.v\n',
+                    encoding='utf8')
+    modb.write_text('set y to 2\n', encoding='utf8')
+    main = proj / 'main.niko'
+    main_src = ('import "lib/a.niko" as a\n'
+                'import "lib/b.niko" as b\n'
+                'say a.x\n'
+                'say b.y\n')
+    main.write_text(main_src, encoding='utf8')
+
+    def r26(p):
+        return str(pathlib.Path(p).resolve())
+
+    cache = _lsp._ModuleTreeCache()
+    diags, _t = _lsp._analyze(main_src, str(main), None, cache)
+    assert diags == {}, diags
+    assert sorted(cache.last_parsed) == sorted(
+        [r26(moda), r26(modb), r26(leaf)]), cache.last_parsed
+
+    # second analysis of the unchanged tree: zero re-parses, same diags
+    diags2, _t = _lsp._analyze(main_src, str(main), None, cache)
+    assert cache.last_parsed == [], cache.last_parsed
+    assert diags2 == diags
+
+    # changing the leaf invalidates it and its downstream importers
+    # (a.niko), but not the unrelated b.niko; the leaf's diagnostic
+    # refreshes against the right file/line
+    leaf.write_text('set v: number to "oops"\n', encoding='utf8')
+    diags, _t = _lsp._analyze(main_src, str(main), None, cache)
+    assert sorted(cache.last_parsed) == sorted(
+        [r26(leaf), r26(moda)]), cache.last_parsed
+    leaf_diags = diags.get(r26(leaf), [])
+    assert len(leaf_diags) == 1, diags
+    assert 'cannot assign' in leaf_diags[0]['message'], leaf_diags
+    assert leaf_diags[0]['range']['start']['line'] == 0, leaf_diags
+
+    # an unsaved override still wins over the broken disk copy; the
+    # override counts as changed, so downstream (a.niko) re-parses, but
+    # the leaf itself is served from memory, not re-read from disk
+    diags, _t = _lsp._analyze(
+        main_src, str(main),
+        {pathlib.Path(r26(leaf)): _parse('set v to 1\n')}, cache)
+    assert diags == {}, diags
+    assert cache.last_parsed == [r26(moda)], cache.last_parsed
+
+    # dropping the override goes back to the disk copy: the in-memory
+    # tree was never cached under the disk mtime
+    diags, _t = _lsp._analyze(main_src, str(main), None, cache)
+    assert len(diags.get(r26(leaf), [])) == 1, diags
+
+    print('test_lsp.py (Alpha 26): mtime cache assertions passed')
+finally:
+    shutil.rmtree(fixture26, ignore_errors=True)
+
+
+# --- Alpha 26: `pkg:` import completions ---------------------------------
+# End to end over stdio: the completion handler offers installed package
+# names inside `import "pkg:` and `.niko` files inside `import
+# "pkg:<name>/`, honoring $NIKO_PKG_CACHE and the nearest niko.lock pin.
+# The network is never touched.
+fixture26b = tempfile.mkdtemp(prefix='niko-lsp-pkgcomp-')
+try:
+    pc = pathlib.Path(fixture26b) / 'pkgcache'
+    (pc / 'hello-1.0.0' / 'sub').mkdir(parents=True)
+    (pc / 'hello-1.0.0' / 'main.niko').write_text('set x to 1\n',
+                                                  encoding='utf8')
+    (pc / 'hello-1.0.0' / 'sub' / 'util.niko').write_text('set y to 2\n',
+                                                          encoding='utf8')
+    (pc / 'hello-2.0.0').mkdir(parents=True)
+    (pc / 'hello-2.0.0' / 'other.niko').write_text('set z to 3\n',
+                                                   encoding='utf8')
+    (pc / 'world-2.1.0').mkdir(parents=True)
+    (pc / 'world-2.1.0' / 'lib.niko').write_text('set w to 4\n',
+                                                 encoding='utf8')
+    projdir = pathlib.Path(fixture26b) / 'proj'
+    projdir.mkdir()
+    (projdir / 'niko.lock').write_text(
+        json.dumps({'packages': {'hello': {'version': '1.0.0',
+                                           'source': 'test-fixture'}}}),
+        encoding='utf8')
+
+    old_cache = os.environ.get('NIKO_PKG_CACHE')
+    os.environ['NIKO_PKG_CACHE'] = str(pc)
+    client5 = Client()
+    try:
+        client5.request('initialize', {'processId': None, 'rootUri': None,
+                                       'capabilities': {}})
+        client5.notify('initialized', {})
+
+        uri = (projdir / 'main.niko').as_uri()
+        client5.notify('textDocument/didOpen', {'textDocument': {
+            'uri': uri, 'languageId': 'niko', 'version': 1,
+            'text': 'import "pkg:'}})
+
+        def complete(text):
+            client5.notify('textDocument/didChange', {
+                'textDocument': {'uri': uri, 'version': 2},
+                'contentChanges': [{'text': text}]})
+            return client5.request('textDocument/completion', {
+                'textDocument': {'uri': uri},
+                'position': {'line': 0, 'character': len(text)}})
+
+        # inside `import "pkg:`: installed package names, kind 9 (Module)
+        items = complete('import "pkg:')
+        labels = {i['label'] for i in items}
+        assert labels == {'hello', 'world'}, labels
+        assert all(i['kind'] == 9 for i in items), items
+
+        # prefix filtering on the package name
+        items = complete('import "pkg:he')
+        assert [i['label'] for i in items] == ['hello'], items
+
+        # after `pkg:<name>/`: `.niko` files inside the package --
+        # hello is pinned to 1.0.0 by niko.lock, so 2.0.0's other.niko
+        # must not appear
+        items = complete('import "pkg:hello/')
+        labels = {i['label'] for i in items}
+        assert labels == {'main.niko', 'sub/util.niko'}, labels
+        assert all(i['kind'] == 17 for i in items), items
+
+        # prefix filtering on the file path
+        items = complete('import "pkg:hello/s')
+        assert [i['label'] for i in items] == ['sub/util.niko'], items
+
+        # an unknown package: empty list, never an error
+        assert complete('import "pkg:nope/') == []
+
+        # a non-pkg import string is unaffected: the normal completions
+        items = complete('import "lib/')
+        labels = {i['label'] for i in items}
+        assert 'match' in labels and 'try_read_file' in labels, labels
+        assert not any(i['kind'] == 17 for i in items), items
+
+        client5.request('shutdown', {})
+        print('test_lsp.py (Alpha 26): pkg: completion assertions passed')
+    finally:
+        client5.close()
+        if old_cache is None:
+            os.environ.pop('NIKO_PKG_CACHE', None)
+        else:
+            os.environ['NIKO_PKG_CACHE'] = old_cache
+
+    # empty cache: empty list, never an error
+    os.environ['NIKO_PKG_CACHE'] = str(pathlib.Path(fixture26b)
+                                       / 'no-such-cache')
+    client6 = Client()
+    try:
+        client6.request('initialize', {'processId': None, 'rootUri': None,
+                                       'capabilities': {}})
+        client6.notify('initialized', {})
+        uri = (projdir / 'main.niko').as_uri()
+        client6.notify('textDocument/didOpen', {'textDocument': {
+            'uri': uri, 'languageId': 'niko', 'version': 1,
+            'text': 'import "pkg:'}})
+        items = client6.request('textDocument/completion', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': len('import "pkg:')}})
+        assert items == [], items
+        client6.request('shutdown', {})
+        print('test_lsp.py (Alpha 26): empty-cache completion assertions passed')
+    finally:
+        client6.close()
+        if old_cache is None:
+            os.environ.pop('NIKO_PKG_CACHE', None)
+        else:
+            os.environ['NIKO_PKG_CACHE'] = old_cache
+finally:
+    shutil.rmtree(fixture26b, ignore_errors=True)

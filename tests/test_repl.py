@@ -4,9 +4,9 @@
 Drives the REPL non-interactively: spawns `python3 -m niko2 repl` as a
 subprocess with scripted stdin and asserts on stdout. Covers session
 persistence across chunks, multi-line blocks, bare-expression echo,
-error recovery (checker + runtime), colon commands, stdlib and local
-imports (incl. init-once semantics), cross-chunk closures, and EOF
-behavior.
+error recovery (checker + runtime), colon commands (including `:undo`),
+stdlib and local imports (incl. init-once semantics), cross-chunk
+closures, and EOF behavior.
 
 Hermetic by construction: every run happens in a throwaway cwd, HOME is
 sandboxed so nothing can touch the real ~, and PYTHONPATH points at the
@@ -249,6 +249,96 @@ def test_use_in_repl():
           cwd=d)
 
 
+def test_undo_set():
+    # Undoing a `set` chunk removes the name from the session.
+    check('undo-set',
+          'set x to 5\n:undo\nsay x\n:quit\n',
+          needles=['Undid chunk: set x to 5', 'unknown name "x"'])
+
+
+def test_undo_function():
+    # Undoing a `to` chunk removes the function from the session.
+    check('undo-fn',
+          'to greet with n:\n    give back "hi " + n\n\n:undo\nsay greet("Bo")\n:quit\n',
+          needles=['Undid chunk: to greet with n:', 'unknown name "greet"'])
+
+
+def test_undo_import_init_once():
+    # Undoing a later chunk rebuilds the session from the kept chunks:
+    # the kept import re-initializes its module exactly once, quietly
+    # (its top-level `say` is not printed a second time).
+    d = SESSION / 'undomod'
+    d.mkdir(parents=True, exist_ok=True)
+    (d / 'm.niko').write_text('say "um-loaded"\nset tag to "um-tag"\n')
+    check('undo-import',
+          'import "m.niko" as a\n'
+          'say a.tag\n'
+          ':undo\n'
+          'say a.tag\n'
+          ':quit\n',
+          needles=['um-loaded', 'um-tag', 'Undid chunk: say a.tag'],
+          count=('um-loaded', 1),
+          cwd=d)
+
+
+def test_undo_import_removes_alias():
+    # Undoing the import chunk itself drops the alias too.
+    d = SESSION / 'undomod2'
+    d.mkdir(parents=True, exist_ok=True)
+    (d / 'm.niko').write_text('say "ua-loaded"\nset tag to "ua-tag"\n')
+    check('undo-import-alias',
+          'import "m.niko" as a\n:undo\nsay a.tag\n:quit\n',
+          needles=['ua-loaded', 'Undid chunk', 'I don\'t know what "a" is.'],
+          count=('ua-loaded', 1),
+          cwd=d)
+
+
+def test_undo_use():
+    # Same for `use`: undoing the chunk unbinds the used names, and the
+    # module body is not re-run by the rebuild (nothing is kept).
+    d = SESSION / 'undouse'
+    d.mkdir(parents=True, exist_ok=True)
+    (d / 'helper.niko').write_text('say "uu-loaded"\nset who to "uu-who"\n')
+    check('undo-use',
+          'use "helper.niko"\n:undo\nsay who\n:quit\n',
+          needles=['uu-loaded', 'Undid chunk', 'unknown name "who"'],
+          count=('uu-loaded', 1),
+          cwd=d)
+
+
+def test_undo_empty():
+    # Undo on an empty session is a friendly message, not an error.
+    check('undo-empty', ':undo\n:quit\n', needles=['Nothing to undo.'])
+
+
+def test_undo_multiple():
+    # Several undos in a row; earlier chunks survive each rebuild.
+    check('undo-multi',
+          'set x to 1\nset y to 2\nset z to 3\n'
+          ':undo\n:undo\n'
+          'say x\nsay y\nsay z\n:quit\n',
+          needles=['1', 'unknown name "y"', 'unknown name "z"'],
+          count=('Undid chunk', 2))
+
+
+def test_undo_line_numbers():
+    # Diagnostics after undo use line numbers re-derived from the kept
+    # chunks (the undone chunk no longer counts).
+    check('undo-lines',
+          'set x to 1\nset y to 2\n:undo\nsay nope\n:quit\n',
+          needles=['Niko error in <repl>: line 2', 'unknown name "nope"'],
+          absent=['line 3'])
+
+
+def test_undo_echo_chunk():
+    # Undoing a bare-expression chunk: its echo is not replayed, and
+    # later echoes keep working with re-derived numbering.
+    check('undo-echo',
+          '1 + 2\n:undo\n3 + 4\n:quit\n',
+          needles=['7', 'Undid chunk: 1 + 2'],
+          count=('3', 1))
+
+
 if __name__ == '__main__':
     try:
         test_banner_and_help()
@@ -269,6 +359,15 @@ if __name__ == '__main__':
         test_eof_mid_block()
         test_error_chunk_not_recorded()
         test_use_in_repl()
+        test_undo_set()
+        test_undo_function()
+        test_undo_import_init_once()
+        test_undo_import_removes_alias()
+        test_undo_use()
+        test_undo_empty()
+        test_undo_multiple()
+        test_undo_line_numbers()
+        test_undo_echo_chunk()
     except AssertionError as e:
         print(f'FAIL: {e}')
         sys.exit(1)

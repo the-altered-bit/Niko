@@ -336,9 +336,14 @@ What remains:
 - **Multi-line constructs need increasing indentation; spaces expected.**
   The REPL cannot know a block is closed except by a blank line or a
   dedent, so tabs or flat multi-line pastes may misbehave.
-- **No single-chunk undo.** A chunk that parsed and typechecked joins
-  the history even if it failed at runtime (script-that-crashed
-  semantics); `:reset` is the only way to forget.
+- **`:undo` drops the last chunk; there is no redo.** Undo rebuilds
+  the session by re-running the kept chunks on a fresh VM, so
+  interpreter state is rewound but side effects outside the VM are
+  replayed, not undone: a kept chunk that writes a file writes it
+  again, and a kept chunk using `ask` prompts again during the
+  rebuild. A chunk that parsed and typechecked still joins the
+  history even if it failed at runtime (script-that-crashed
+  semantics).
 - **Redefining a function replaces its nested helpers session-wide.**
   A reference to the old function saved in an earlier chunk resolves
   nested names to the newest definitions.

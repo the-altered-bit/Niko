@@ -303,6 +303,26 @@ match cases in `tests/test_formatter.py`.
   VS Code run (later headless runs SIGSEGV'd inside the Electron binary
   itself — a container issue). Full suite green. See
   `RELEASE_NOTES_ALPHA25.md`.
+- **Alpha 26 is complete**: tooling polish batch. **REPL `:undo`**
+  (`niko2/repl.py`): pops the last accepted chunk and rebuilds the
+  session from the kept chunks on a fresh VM/env — module init-once
+  preserved (module bodies never re-run visibly), echo numbering and
+  cumulative line numbers re-derived; empty session prints
+  `Nothing to undo.`. Limits: no redo; external side effects are
+  replayed, not rewound. **LSP diagnostics mtime cache** (`niko2/lsp.py`,
+  `_ModuleTreeCache`): parsed trees cached keyed on (mtime, size); a
+  changed module invalidates itself and all transitive downstream
+  importers; unsaved overrides always count as changed and are never
+  cached; fast path untouched. Measured on a synthetic 51-file project:
+  29.9 → 10.5 ms/analysis (2.8×), 50 → 0 re-parses on repeats. **LSP
+  `pkg:` completions**: inside `import "pkg:…` offers installed package
+  names from the local cache (honors `NIKO_PKG_CACHE`); after
+  `pkg:<name>/` offers `.niko` paths inside the package (lockfile pin
+  wins, else newest cached). Non-`pkg:` strings untouched; empty cache
+  → no completions, never an error; no network. Tests: 9 new `undo-*`
+  checks (`tests/test_repl.py`, 30/30 green); mtime-cache + `pkg:`
+  sections in `tests/test_lsp.py`. Full suite green. See
+  `RELEASE_NOTES_ALPHA26.md` / `ALPHA26_DESIGN.md`.
 - **Alpha 19 is complete**: package registry + version-range solving.
   `niko2/semver.py` (range grammar: `*`, exact, partials, npm-style
   `^`/`~`, comparators, comma AND; `max_satisfying` solver,

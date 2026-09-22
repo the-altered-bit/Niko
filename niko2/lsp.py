@@ -13,8 +13,16 @@ Protocol for a good editing experience in any LSP-capable editor:
   or use yields exactly one diagnostic on its line; errors inside module
   files are published against the right file/line. Diagnostics are
   read-only: they never write files and never touch the network.
+  Alpha 26: the module path caches each module's parsed tree keyed on
+  the file's (mtime, size), so unchanged modules are not re-parsed on
+  every keystroke; a changed module invalidates its own entry and
+  everything downstream (its importers, transitively); unsaved open
+  documents still override disk and always count as changed.
 - `textDocument/completion` — keywords, builtins, and names defined in
-  the file
+  the file. Alpha 26: inside an `import "pkg:…"` string, installed
+  package names from the local package cache (before the `/`), then
+  `.niko` files inside the named package (after the `/`); plain import
+  strings are untouched, and the network is never consulted.
 - `textDocument/hover` — builtin docs and inferred types of your names;
   follows `import` across files (Alpha 21: `alias.name` shows the
   target's signature and doc comment from the module file) and `use`
@@ -36,6 +44,7 @@ numbers but not columns, so results resolve to the nearest sensible line
 exactly as they do at compile time; an import or use that can't be
 resolved simply yields no definition (never an error).
 """
+import os
 import re
 import sys
 import traceback
@@ -50,6 +59,7 @@ from .formatter import format_program
 from .symbols import collect_symbols, find_symbol, all_names, _infer
 from .diagnostics import Diagnostic
 from .ast import Node, ImportStmt, UseStmt, AttrExpr, NameExpr, SetStmt, FunctionDef
+from . import packages as _packages
 from .modules import (resolve_import, resolve_use, ImportErrorNiko,
                       build_module_graph, check_units,
                       _unit_exports as _module_unit_exports)
@@ -107,6 +117,65 @@ BUILTIN_DOCS = {
 }
 
 WORD = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
+
+# Matches the text before the cursor when it sits inside an import
+# string that starts with `pkg:`, e.g. `import "pkg:hel` or
+# `import 'pkg:hello/sub/ut`. Group 2 is everything after `pkg:`.
+# The trailing `[^'"]*` keeps the match inside the string: once the
+# closing quote is typed the cursor is no longer "inside" it.
+_PKG_IMPORT_RE = re.compile(r'\bimport\s+([\'"])pkg:([^\'"]*)$')
+
+
+def _cached_package_names():
+    """Sorted [(name, newest version)] installed in the local package
+    cache (`$NIKO_PKG_CACHE` or `~/.niko/packages`).
+
+    Offline by construction -- this only lists directories. An empty or
+    unreadable cache yields [], never an error.
+    """
+    try:
+        root = _packages.default_cache_root()
+        if not root.is_dir():
+            return []
+        names = set()
+        for child in root.iterdir():
+            if not child.is_dir():
+                continue
+            m = re.match(r'^(.*)-(\d+\.\d+\.\d+)$', child.name)
+            if m:
+                names.add(m.group(1))
+        out = []
+        for name in sorted(names):
+            vers = _packages.installed_versions(name, root)
+            out.append((name, vers[-1][1] if vers else None))
+        return out
+    except OSError:
+        return []
+
+
+def _pkg_dir_for_completion(uri, name):
+    """Absolute Path of the cached package `name` for completion, or
+    None when it can't be resolved.
+
+    Mirrors compile-time resolution: the nearest enclosing `niko.lock`
+    pin wins, else the newest cached version (Alpha 24's known limit
+    applies -- `pkg:` imports *inside* cached packages resolve to the
+    newest cached version, and so does this). Offline: never touches the
+    network; anything unresolvable (unknown package, corrupt lockfile,
+    missing pin) yields None.
+    """
+    try:
+        locked = {}
+        entry = _uri_to_path(uri)
+        if entry is not None:
+            try:
+                locked = _packages.locked_package_versions(
+                    Path(entry).parent)
+            except _packages.PackageError:
+                locked = {}
+        return _packages.resolve_package(name, locked.get(name))
+    except _packages.PackageError:
+        return None
 
 
 def _word_at(line_text, character):
@@ -345,7 +414,118 @@ def _lint_alias_attrs(graph):
     return out
 
 
-def _analyze(text, entry_path=None, source_overrides=None):
+class _ModuleTreeCache:
+    """Per-entry mtime/size-keyed cache of parsed module trees (Alpha 26).
+
+    DESIGN NOTE -- what is cached and when it is thrown away:
+
+    Each entry maps a resolved module path to ``(mtime_ns, size, tree)``:
+    the parsed tree is reused only while the file's mtime *and* size both
+    still match. The cache feeds the module pipeline through the existing
+    ``source_overrides`` mechanism, so ``build_module_graph`` needs no
+    changes: a cache hit is simply a pre-parsed tree handed in as an
+    override, and a miss is parsed from disk exactly as before.
+
+    INVALIDATION RULE (simplest correct): a module counts as *changed*
+    when its (mtime, size) differs from the cached key, when the file can
+    no longer be stat'ed, or when an open unsaved document overrides it
+    (an unsaved doc always counts as changed, and its in-memory tree is
+    never stored in the cache -- otherwise a later save would serve the
+    stale in-memory tree). A changed module invalidates its own entry
+    *and everything downstream of it*: its importers, transitively, using
+    the previous analysis's import/use edges. Over-invalidation is always
+    safe (it just re-parses); under-invalidation would publish stale
+    diagnostics.
+
+    Why invalidate downstream at all, when a downstream module's own file
+    didn't change? A module's diagnostics can depend on its dependencies:
+    `use` merges the dependency's names into scope, and the alias-
+    attribute lint reads the dependency's exports. So a dependency change
+    must refresh the importers' diagnostics. Today the cached unit is the
+    parsed tree, which makes the rule observable as a downstream re-parse;
+    the rule stays correct if the cached unit later grows into per-module
+    check results.
+
+    The fast path (no top-level import/use) never touches this cache.
+    ``last_parsed`` records the resolved paths re-parsed from disk by the
+    most recent *successful* analysis -- a test/benchmark hook, not part
+    of the protocol.
+    """
+
+    def __init__(self):
+        self.trees = {}      # str(resolved path) -> (mtime_ns, size, tree)
+        self.importers = {}  # str(resolved path) -> set(str(importer path))
+        self.last_parsed = []
+
+    def merged_overrides(self, entry_path, open_overrides):
+        """Drop stale entries (changed modules + downstream importers),
+        then return the effective ``source_overrides``: fresh cached trees
+        with the open-document overrides winning.
+
+        Returns None when there is nothing to override, so
+        ``build_module_graph`` behaves exactly as without a cache.
+        """
+        changed = set()
+        for pstr, (mtime_ns, size, _tree) in list(self.trees.items()):
+            try:
+                st = os.stat(pstr)
+            except OSError:
+                changed.add(pstr)
+                continue
+            if (st.st_mtime_ns, st.st_size) != (mtime_ns, size):
+                changed.add(pstr)
+        if open_overrides:
+            # An unsaved document always counts as changed; its tree is
+            # used as-is and never stored in the cache.
+            for p in open_overrides:
+                changed.add(str(Path(p).resolve()))
+        # Invalidate everything downstream: importers, transitively.
+        doomed = set(changed)
+        stack = list(changed)
+        while stack:
+            cur = stack.pop()
+            for parent in self.importers.get(cur, ()):
+                if parent not in doomed:
+                    doomed.add(parent)
+                    stack.append(parent)
+        for pstr in doomed:
+            self.trees.pop(pstr, None)
+        merged = {Path(pstr): tree
+                  for pstr, (_m, _s, tree) in self.trees.items()}
+        if open_overrides:
+            merged.update(open_overrides)
+        return merged or None
+
+    def commit(self, graph, open_overrides):
+        """Record this analysis's results: fresh (mtime, size, tree) for
+        every disk-backed module, the new importer edges, and prune
+        modules that are no longer reachable."""
+        skip = ({str(Path(p).resolve()) for p in open_overrides}
+                if open_overrides else set())
+        importers = {}
+        live = set()
+        for unit in graph:
+            pstr = str(unit.path)
+            live.add(pstr)
+            for _alias, target, _line in unit.imports:
+                importers.setdefault(str(target), set()).add(pstr)
+            for _raw, target, _line in unit.uses:
+                if target is not None:
+                    importers.setdefault(str(target), set()).add(pstr)
+            if unit.kind == 'entry' or pstr in skip:
+                continue
+            try:
+                st = os.stat(pstr)
+            except OSError:
+                continue
+            self.trees[pstr] = (st.st_mtime_ns, st.st_size, unit.tree)
+        self.importers = importers
+        for pstr in list(self.trees):
+            if pstr not in live:
+                del self.trees[pstr]
+
+
+def _analyze(text, entry_path=None, source_overrides=None, module_cache=None):
     """Return ({absolute path: [diagnostics]}, entry tree or None).
 
     Alpha 23: when the entry file has top-level `import`/`use`
@@ -359,9 +539,16 @@ def _analyze(text, entry_path=None, source_overrides=None):
     is read from disk, read-only -- diagnostics never write files and
     never touch the network (package-cache reads are local).
 
+    `module_cache` is an optional `_ModuleTreeCache` (one per entry file,
+    owned by the Server): unchanged modules are not re-parsed on every
+    analysis -- their trees are handed to the module pipeline through
+    `source_overrides`, keyed on each file's (mtime, size). A changed
+    module invalidates its own entry and everything downstream of it
+    (its importers, transitively); see the class design note.
+
     Without module statements -- or without a file path, as for an
     unsaved document -- this is the old single-file check: no disk
-    reads at all.
+    reads at all, and the cache is untouched.
     """
     if entry_path is not None:
         entry_path = str(Path(entry_path).resolve())
@@ -382,6 +569,12 @@ def _analyze(text, entry_path=None, source_overrides=None):
         except TypeErrorNiko as e:
             add(entry_path or '<memory>', e)
         return diags, tree
+    open_overrides = source_overrides
+    cache_before = None
+    if module_cache is not None:
+        source_overrides = module_cache.merged_overrides(entry_path,
+                                                         open_overrides)
+        cache_before = set(module_cache.trees)
     try:
         graph = build_module_graph(entry_path, entry_tree=tree,
                                    source_overrides=source_overrides)
@@ -394,6 +587,13 @@ def _analyze(text, entry_path=None, source_overrides=None):
     except ParseError as e:
         add(e.path or entry_path, e)
         return diags, tree
+    if module_cache is not None:
+        # The graph built cleanly: record the fresh (mtime, size, tree)
+        # entries and the new importer edges. Entries re-parsed this
+        # round are the ones that were invalidated before the build.
+        module_cache.commit(graph, open_overrides)
+        module_cache.last_parsed = sorted(set(module_cache.trees)
+                                          - cache_before)
     try:
         check_units(graph)
     except TypeErrorNiko as e:
@@ -412,6 +612,9 @@ class Server:
         self.trees = {}         # uri -> parsed tree (or None)
         self._diags_owner = {}  # uri -> root uri whose analysis last
                                 # published diagnostics for it
+        self._module_caches = {}  # resolved entry path -> _ModuleTreeCache
+                                  # (Alpha 26: mtime/size-keyed parsed
+                                  # module trees, one cache per entry)
         self._id_seq = 0
 
     def send(self, obj):
@@ -441,6 +644,7 @@ class Server:
         text = self.docs.get(uri, '')
         entry_path = _uri_to_path(uri)
         overrides = None
+        module_cache = None
         if entry_path is not None:
             # Only parse the other open documents when the entry
             # actually needs the module pipeline.
@@ -450,7 +654,11 @@ class Server:
                 quick = None
             if quick is not None and _has_module_stmts(quick):
                 overrides = self._open_overrides(uri)
-        diags_by_path, tree = _analyze(text, entry_path, overrides)
+                key = str(Path(entry_path).resolve())
+                module_cache = self._module_caches.setdefault(
+                    key, _ModuleTreeCache())
+        diags_by_path, tree = _analyze(text, entry_path, overrides,
+                                       module_cache)
         self.trees[uri] = tree
         resolved_entry = (str(Path(entry_path).resolve())
                           if entry_path is not None else None)
@@ -553,8 +761,65 @@ class Server:
 
     # -- feature implementations --------------------------------------
 
+    def _complete_pkg_import(self, uri, pos):
+        """Completion items for `import "pkg:…"` strings (Alpha 26), or
+        None when the cursor is not inside such a string.
+
+        - `import "pkg:|` / `import "pkg:par|` -> installed package
+          names from the local package cache (`$NIKO_PKG_CACHE`
+          honored), filtered by the typed prefix.
+        - `import "pkg:name/|` / `import "pkg:name/sub/pa|` -> `.niko`
+          files inside that package, as relative paths, filtered by
+          the typed remainder.
+
+        Plain (non-`pkg:`) import strings are untouched (None). An empty
+        or unresolvable cache yields [], never an error. The network is
+        never consulted -- package listing and resolution are
+        cache-local by construction.
+        """
+        line = pos.get('line')
+        char = pos.get('character')
+        if line is None or char is None:
+            return None
+        lines = self.docs.get(uri, '').splitlines()
+        if line >= len(lines):
+            return None
+        prefix = lines[line][:char]
+        m = _PKG_IMPORT_RE.search(prefix)
+        if m is None:
+            return None
+        hash_i = prefix.find('#')
+        if hash_i != -1 and hash_i < m.start():
+            return None  # inside a comment, not an import string
+        rest = m.group(2)
+        if '/' not in rest:
+            return [{'label': name, 'kind': 9,
+                     'detail': (f'Niko package {ver}' if ver
+                                else 'Niko package')}
+                    for name, ver in _cached_package_names()
+                    if name.startswith(rest)]
+        name, _sep, sub = rest.partition('/')
+        pkg_dir = _pkg_dir_for_completion(uri, name)
+        if pkg_dir is None:
+            return []
+        items = []
+        try:
+            files = sorted(pkg_dir.rglob('*.niko'))
+        except OSError:
+            return []
+        for f in files:
+            rel = f.relative_to(pkg_dir).as_posix()
+            if rel.startswith(sub):
+                items.append({'label': rel, 'kind': 17,
+                              'detail': f'pkg:{name}'})
+        return items
+
     def _complete(self, params):
         uri = params['textDocument']['uri']
+        pkg_items = self._complete_pkg_import(uri,
+                                              params.get('position') or {})
+        if pkg_items is not None:
+            return pkg_items
         items = [{'label': k, 'kind': 14} for k in KEYWORDS]
         for name in sorted(BUILTIN_NAMES):
             items.append({'label': name, 'kind': 3,
