@@ -1,0 +1,3 @@
+# Consumes the hello-pkg package from the local cache.
+import "pkg:hello-pkg/greet.niko" as greet
+say greet.greet("Casper")

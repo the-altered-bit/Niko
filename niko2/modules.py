@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from . import packages as _packages
 from .parser import parse, ParseError
 from .typecheck import check, TypeErrorNiko
 from .runtime import Env, execute, NikoRuntimeError
@@ -161,10 +162,28 @@ def niko_path_roots():
     return roots
 
 
+def _resolve_pkg_import(raw, line, importer_path):
+    """Resolve ``import "pkg:<name>/path/to/file.niko" as alias``.
+
+    Looks up the pinned version in the nearest enclosing ``niko.lock``
+    (via the importing file's directory), else the newest cached version.
+    NOTE: offline by construction -- this never touches the network;
+    installs happen only in ``packages.install_package`` (``niko2 get``).
+    """
+    try:
+        locked = _packages.locked_package_versions(Path(importer_path).parent)
+        return _packages.resolve_pkg_spec(raw, locked)
+    except _packages.PackageError as e:
+        raise ImportErrorNiko(str(e), line=line, path=str(importer_path))
+
+
 def resolve_import(raw_path, base_dir, line, importer_path):
     """Resolve an import path to an absolute .niko file.
 
-    Search order (Alpha 14):
+    Search order (Alpha 14, extended in Alpha 16):
+      0. ``pkg:<name>/...`` -- a package from the local package cache
+         (``~/.niko/packages``); version from ``niko.lock`` if present,
+         else the newest cached version,
       1. the importing file's directory,
       2. each NIKO_PATH directory (if the env var is set),
       3. the bundled standard library -- for paths starting with
@@ -176,6 +195,8 @@ def resolve_import(raw_path, base_dir, line, importer_path):
     file's line) when the path is not a .niko file or cannot be found.
     """
     p = (raw_path or '').strip()
+    if p.startswith(_packages.PKG_IMPORT_PREFIX):
+        return _resolve_pkg_import(p, line, importer_path)
     if Path(p).suffix != '.niko':
         raise ImportErrorNiko(f'import expects a .niko file, got "{raw_path}"',
                               line=line, path=str(importer_path))

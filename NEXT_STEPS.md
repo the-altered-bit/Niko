@@ -112,8 +112,8 @@ match cases in `tests/test_formatter.py`.
   (`obj.method(...)` via the first-class callee path), and
   `import`/`as` were added to LSP keywords + the VS Code grammar.
   Tests: `tests/test_modules.py` (7 programs 3-way differential +
-  7 error cases). Future work: stdlib search path / package manager,
-  LSP go-to-definition across files. See `RELEASE_NOTES_ALPHA13.md` and
+  7 error cases). Future work: LSP go-to-definition across files.
+  See `RELEASE_NOTES_ALPHA13.md` and
   `ALPHA13_DESIGN.md`.
 - **Alpha 14 is complete**: Niko 2 standard library (pure-Niko `text`,
   `math`, `lists`, `records` under `niko2/stdlib/`, `import
@@ -122,8 +122,9 @@ match cases in `tests/test_formatter.py`.
   stdlib → cwd) + docs generated from doc comments (`STDLIB.md`, kept
   fresh by `tests/test_stdlib2.py`) + VM `CALL_BUILTIN` fix (builtin
   name in call position always means the builtin, matching
-  checker/WASM/native). Full suite green. Package manager / registry
-  stays future work. See `RELEASE_NOTES_ALPHA14.md`, `ALPHA14_DESIGN.md`,
+  checker/WASM/native). Full suite green. Package manager is done in
+  Alpha 16; a registry server stays future work. See
+  `RELEASE_NOTES_ALPHA14.md`, `ALPHA14_DESIGN.md`,
   `STDLIB.md`.
 - **Alpha 15 is complete**: WASM codegen bugfix — `skip` inside
   `for`/`repeat` loops used to hang node forever (the `br` back to the loop
@@ -134,6 +135,26 @@ match cases in `tests/test_formatter.py`.
   known-limits entry removed. New `tests/test_loop_control.py`: 11 cases
   3-way differential (VM/WASM/native byte-identical) with timeouts. Full
   suite green. See `RELEASE_NOTES_ALPHA15.md`.
+- **Alpha 16 is complete**: package manager — `niko2 get
+  <directory|git-url>` (the only command that touches the network;
+  shallow git clone, `.git` stripped) installs into
+  `~/.niko/packages/<name>-<version>/` (`NIKO_PKG_CACHE` overrides), with
+  `.niko-source.json` provenance. `import "pkg:<name>/path/file.niko" as
+  alias` — no version in the string; resolution is lockfile pin, else
+  newest cached, else a friendly `unknown package` error; compile/run /
+  check / wasm / native / debug / lsp resolve packages offline from the
+  cache. `niko2 lock` adds the `"packages"` table (`{"version",
+  "source"}` per package) and never silently upgrades; `niko2 deps` shows
+  `pkg:` imports. Manifest: canonical `[package]` table (`name`,
+  `version`, `entry` default `main.niko`, optional `description`);
+  Alpha 4-era flat keys still accepted, unknown fields ignored; name
+  `^[A-Za-z][A-Za-z0-9_-]*$`, strict `X.Y.Z` versions; `niko2 init`
+  writes the canonical form. No `..` escapes from package dirs;
+  `import "stdlib/text.niko"` unaffected. Limits: no registry server,
+  no `publish`, no version-range solving, no `niko` command alias (kept
+  unambiguous with Niko 1's `niko.py`). Worked example in
+  `examples/packages/` (+`README.txt`). Tests: `tests/test_packages.py`;
+  full suite green. See `RELEASE_NOTES_ALPHA16.md`, `ALPHA16_DESIGN.md`.
 
 ## Standing cautions
 

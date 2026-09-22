@@ -1,0 +1,2 @@
+# hello-pkg's entry point (unused by consumers, but required by the manifest).
+say "hello-pkg is installed"

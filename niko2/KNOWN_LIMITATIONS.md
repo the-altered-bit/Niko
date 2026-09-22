@@ -221,11 +221,36 @@ generated code). Same value model as WASM (boxed values, f64 numbers).
   analyze one file at a time, so go-to-definition and hover don't follow
   `import` across files (`import` aliases check as `map` so nothing
   breaks).
-- **Module search path exists; no package manager yet.** `import` resolves:
-  importing file's dir → `NIKO_PATH` dirs → bundled stdlib (`stdlib/…`
-  paths) → cwd. A local/`NIKO_PATH` `stdlib/` tree shadows the bundled
-  one. There is still no registry / package manager.
+- **Module search path exists; the package manager shipped in Alpha 16.**
+  `import` resolves: importing file's dir → `NIKO_PATH` dirs → bundled
+  stdlib (`stdlib/…` paths) → cwd; a local/`NIKO_PATH` `stdlib/` tree
+  shadows the bundled one. `pkg:<name>/…` imports resolve from the
+  package cache (`~/.niko/packages`, see below).
 - **`use` is rejected inside imported modules.** The entry file may still
   use `use "…"`; imported modules must use `import "…" as …`.
 - **`import` must be at the top of the file** — not inside a `to` or a
   block (checker error: `import must be at the top of the file`).
+
+## Alpha 16 package manager limits
+
+- **No registry server and no `publish` command.** Packages install from
+  a local directory or a git URL (`niko2 get <directory|git-url>`) only.
+  There is deliberately no package registry to query or push to.
+- **No version-range solving.** `niko2 get` installs exactly the version
+  described by the source's own `niko.toml`; `import "pkg:…"` takes no
+  version — the `niko.lock` pin (written by `niko2 lock`) decides, with
+  the newest cached version as fallback when there is no lockfile.
+- **`niko2 get` is the only command that uses the network.**
+  Compile/run/check/wasm/native/debug/lsp all resolve packages offline
+  from `~/.niko/packages` (override with `NIKO_PKG_CACHE`). A
+  pinned-but-evicted package (lock says 9.9.9, only 1.0.0 cached) is an
+  explicit error, not a silent fallback.
+- **The cache is a plain directory copy.** To pick up upstream changes
+  from a git source, run `niko2 get <url> --force` again (re-locking
+  keeps the old pin if you don't want the new version — `niko2 lock`
+  never silently upgrades).
+- **No `niko` command alias.** The command is `niko2 get`; a bare `niko`
+  script was deliberately not added to avoid ambiguity with Niko 1's
+  `niko.py` at the repo root.
+- **Flags after positionals:** `niko2 get <src> --force` works;
+  `niko2 get --force <src>` is rejected (pre-existing argparse quirk).

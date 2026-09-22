@@ -96,8 +96,9 @@ def run(src,name='<memory>'):
 
 def main():
     ap=argparse.ArgumentParser(prog='niko2',description='Niko 2 compiler/interpreter')
-    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','deps','lock','lsp','debug','wasm','native'])
+    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','deps','lock','get','lsp','debug','wasm','native'])
     ap.add_argument('file',nargs='?')
+    ap.add_argument('--force',action='store_true',help='(get) reinstall the package even if it is already cached')
     ap.add_argument('-o','--output',help='output file (wasm: <file>.wasm, native: <file>)')
     ap.add_argument('--emit-c',action='store_true',help='(native) also write the generated C source next to the output')
     ap.add_argument('--run',action='store_true',help='run the .wasm with node after building')
@@ -144,11 +145,33 @@ def main():
         return 0
     if a.command=='lock':
         root=find_project_root(a.file or '.')
-        lock_path=write_lock_file(root)
+        try:
+            lock_path=write_lock_file(root)
+        except Exception as e:
+            # PackageError (a ValueError) when a pkg:-imported package is
+            # not installed: tell the user to run `niko2 get` first.
+            print(f'Niko error: {e}'); return 1
         print(f'✓ wrote {lock_path}')
         return 0
+    # Alpha 16: install a package into the local cache. The ONLY command
+    # that may touch the network (git clone); everything else resolves
+    # packages offline from the cache.
+    if a.command=='get':
+        if not a.file:
+            print('Usage: niko2 get <package-directory|git-url> [--force]'); return 2
+        from .packages import install_package, PackageError
+        try:
+            result=install_package(a.file, force=a.force)
+        except PackageError as e:
+            print(f'Niko error: {e}'); return 1
+        m=result.manifest
+        if result.fresh:
+            print(f'✓ installed {m.name} {m.version} → {result.path}')
+        else:
+            print(f'{m.name} {m.version} is already installed ({result.path}) -- use --force to reinstall')
+        return 0
     if not a.file:
-        print('Usage: niko2 run <file.niko|.nikoir> | niko2 check <file.niko> | niko2 format <file.niko> | niko2 deps [folder] | niko2 lock [folder] | niko2 init <folder> | niko2 lsp | niko2 debug | niko2 wasm <file.niko> [-o out.wasm] [--run] | niko2 native <file.niko> [-o out] [--run] [--emit-c]'); return 2
+        print('Usage: niko2 run <file.niko|.nikoir> | niko2 check <file.niko> | niko2 format <file.niko> | niko2 deps [folder] | niko2 lock [folder] | niko2 get <package-directory|git-url> [--force] | niko2 init <folder> | niko2 lsp | niko2 debug | niko2 wasm <file.niko> [-o out.wasm] [--run] | niko2 native <file.niko> [-o out] [--run] [--emit-c]'); return 2
 
     # Alpha 8: compile to WebAssembly.
     if a.command=='wasm':

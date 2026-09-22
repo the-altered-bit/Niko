@@ -1,0 +1,4 @@
+[package]
+name = "hello-pkg"
+version = "1.0.0"
+description = "A tiny example package: one greeting function."

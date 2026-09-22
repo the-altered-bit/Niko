@@ -175,6 +175,26 @@ three backends.
 
 In the browser IDE, files live in `localStorage` (virtual); on the desktop they are real files.
 
+### 3d. Packages (Niko 2 only)
+
+Reusable libraries are packages: a folder (or git repo) with a `niko.toml`
+manifest (`[package]` with `name`, `version`, optional `entry` and
+`description`). Install one with `niko2 get <folder-or-git-url>` — the
+only command that ever uses the network — then import it:
+
+```
+import "pkg:hello-pkg/greet.niko" as greet
+say greet.greet("Casper")
+```
+
+The import string takes no version; versions live in `niko.lock`
+(`niko2 lock` pins them and never silently upgrades). Resolution is:
+lockfile pin → newest cached version in `~/.niko/packages` (override with
+`NIKO_PKG_CACHE`) → a friendly `unknown package` error telling you to run
+`niko2 get` first. Everything else resolves packages offline. There is no
+registry server and no version-range solving; `examples/packages/`
+holds a worked example.
+
 ## 5. Error messages (part of the language design)
 
 Format: `Oops on line N: MESSAGE`. Messages are plain English. Examples:

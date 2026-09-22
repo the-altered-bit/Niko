@@ -1,0 +1,3 @@
+# hello-pkg/greet.niko — one exported function.
+to greet with name -> text:
+    give back "Hello, " + name + ", from a Niko package!"
