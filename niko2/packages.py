@@ -6,17 +6,27 @@ while ``modules.py`` owns how ``import`` statements resolve to files.
 What lives here
 ---------------
 * ``niko.toml`` manifest parsing and validation (``parse_manifest``).
-* ``niko2 get <source>`` installation (``install_package``) -- the ONLY
-  place in the whole toolchain that touches the network. Compiling,
-  running, checking, and the LSP/debugger resolve packages from the
-  local cache and never go near the network.
+* ``niko2 get <source>`` installation (``install_package``) -- installs
+  from a local directory or a git URL. Registry installs
+  (``niko2 get <name>[@<range>]``) live in ``registry.py`` and share the
+  cache layout and lockfile helpers here.
 * The ``pkg:`` import form used by ``modules.resolve_import``:
   ``import "pkg:<name>/path/to/file.niko" as alias`` resolves to
   ``<cache>/<name>-<version>/path/to/file.niko``. The version comes from
   the project's ``niko.lock`` when present, otherwise the newest cached
   version.
 * Lockfile helpers: ``lock_packages_for_project`` produces the
-  ``"packages"`` table that ``niko2 lock`` writes.
+  ``"packages"`` table that ``niko2 lock`` writes; ``write_package_pin``
+  creates/updates a single pin (used by registry installs).
+
+What lives in ``registry.py`` (Alpha 19) instead
+------------------------------------------------
+The package *registry*: version-range solving (``semver.py``), the
+registry index protocol, ``niko2 get <name>[@<range>]``,
+``niko2 publish``, and ``niko2 get --update``. ``get`` and ``publish``
+are the only commands that touch the network -- compiling, running,
+checking, and the LSP/debugger resolve packages from the local cache
+and never go near the network.
 
 Deliberate limits (Alpha 16 -- no registry, no solver)
 ------------------------------------------------------
@@ -39,8 +49,10 @@ here). Each cached package also carries a ``.niko-source.json`` file
 recording where it came from (``{"source": ..., "kind": "git"|"local"}``),
 so ``niko2 lock`` can record provenance without re-asking the user.
 
-This module imports only the standard library: it must stay importable
-from ``modules.py`` and ``project.py`` without creating import cycles.
+This module imports only the standard library and ``semver`` (which is
+itself stdlib-only): it must stay importable from ``modules.py`` and
+``project.py`` without creating import cycles. ``registry.py`` imports
+*this* module, never the other way round.
 Errors are raised as ``PackageError`` (plain English); callers that have
 source positions (e.g. ``modules.resolve_import``) translate them into
 ``ImportErrorNiko`` with line/col.
@@ -52,8 +64,10 @@ import re
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+from . import semver
 
 try:
     import tomllib
@@ -85,6 +99,10 @@ class PackageManifest:
     entry: str = 'main.niko'
     description: str = ''
     manifest_path: Path | None = None
+    #: Package dependencies: name -> version-range string, from the
+    #: manifest's top-level ``[dependencies]`` table (Alpha 19). Empty
+    #: when the package declares none.
+    dependencies: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -119,7 +137,10 @@ def parse_manifest(path):
     Rules enforced: ``name`` is letters/digits/``-``/``_`` starting with
     a letter; ``version`` is strict ``X.Y.Z`` (no leading zeros);
     ``entry`` defaults to ``main.niko`` and must name a ``.niko`` file.
-    Every failure raises ``PackageError`` naming the file and the problem.
+    An optional top-level ``[dependencies]`` table maps package names to
+    version-range strings (``greet = "^1.0"``); names follow the package
+    name rule and ranges must parse (see ``semver``). Every failure
+    raises ``PackageError`` naming the file and the problem.
     """
     path = Path(path)
     if tomllib is None:
@@ -168,8 +189,43 @@ def parse_manifest(path):
     if not isinstance(description, str):
         raise PackageError(f'{path}: "description" must be text')
 
+    dependencies = _parse_dependencies(path, data)
+
     return PackageManifest(name=name, version=version, entry=entry,
-                           description=description, manifest_path=path)
+                           description=description, manifest_path=path,
+                           dependencies=dependencies)
+
+
+def _parse_dependencies(path, data):
+    """Validate the manifest's top-level ``[dependencies]`` table.
+
+    Returns ``{name: range_string}`` (``{}`` when absent). Names follow
+    the package name rule; every range must parse via ``semver``.
+    """
+    deps = data.get('dependencies', {})
+    if deps is None:
+        return {}
+    if not isinstance(deps, dict):
+        raise PackageError(
+            f'{path}: "[dependencies]" must be a table of '
+            'name = "range" pairs, e.g.\n[dependencies]\ngreet = "^1.0"')
+    out = {}
+    for dep_name, dep_range in deps.items():
+        if not _NAME_RE.match(dep_name):
+            raise PackageError(
+                f'{path}: bad dependency name "{dep_name}" -- use letters, '
+                'numbers, "-" and "_", starting with a letter')
+        if not isinstance(dep_range, str) or not dep_range.strip():
+            raise PackageError(
+                f'{path}: dependency "{dep_name}" needs a version range '
+                'string, e.g. "^1.0"')
+        try:
+            semver.parse_range(dep_range)
+        except semver.SemverError as e:
+            raise PackageError(
+                f'{path}: dependency "{dep_name}": {e}')
+        out[dep_name] = dep_range.strip()
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -222,10 +278,12 @@ def read_source_record(pkg_dir):
         return {}
 
 
-def _write_source_record(pkg_dir, source, kind):
+def _write_source_record(pkg_dir, source, kind, extra=None):
+    record = {'source': source, 'kind': kind}
+    if extra:
+        record.update(extra)
     (Path(pkg_dir) / SOURCE_RECORD).write_text(
-        json.dumps({'source': source, 'kind': kind}, indent=2) + '\n',
-        encoding='utf8')
+        json.dumps(record, indent=2) + '\n', encoding='utf8')
 
 
 # ---------------------------------------------------------------------------
@@ -462,7 +520,11 @@ def lock_packages_for_project(root, cache_root=None):
     (re-locking never silently upgrades); otherwise the newest cached
     version is pinned. ``source`` comes from the cache's
     ``.niko-source.json`` provenance record (falling back to the old lock
-    entry, then ``"unknown"``). An imported package that isn't installed
+    entry, then ``"unknown"``). For registry installs the requested
+    ``range`` is recorded too (previous lock entry first, then the
+    install's recorded range); entries without a range simply omit the
+    field, keeping the Alpha 16 ``{version, source}`` shape
+    backwards-compatible. An imported package that isn't installed
     at all is a hard error naming ``niko2 get``.
     """
     root = Path(root)
@@ -485,8 +547,57 @@ def lock_packages_for_project(root, cache_root=None):
                     f'package "{name}" is imported but not installed -- '
                     "run 'niko2 get <source>' to install it first")
             version = versions[-1][1]
-        source = (read_source_record(cache_dir_for(name, version, cache_root)).get('source')
+        record = read_source_record(cache_dir_for(name, version, cache_root))
+        source = (record.get('source')
                   or (prev.get('source') if isinstance(prev, dict) else None)
                   or 'unknown')
-        locked[name] = {'version': version, 'source': source}
+        entry = {'version': version, 'source': source}
+        prev_range = prev.get('range') if isinstance(prev, dict) else None
+        rec_range = record.get('range') if record.get('kind') == 'registry' else None
+        if prev_range or rec_range:
+            entry['range'] = prev_range or rec_range
+        locked[name] = entry
     return locked
+
+
+def find_lock_dir(start):
+    """Nearest enclosing directory of *start* containing ``niko.lock``.
+
+    Returns None when there is no lockfile on the way up.
+    """
+    d = Path(start).resolve()
+    for cur in [d, *d.parents]:
+        if (cur / 'niko.lock').is_file():
+            return cur
+    return None
+
+
+def write_package_pin(lock_dir, name, version, source, range=None):
+    """Create or update one entry of ``<lock_dir>/niko.lock``.
+
+    Only the ``"packages"`` table entry for *name* is touched; the rest
+    of the lockfile (including ``"dependencies"``) is preserved, and a
+    missing lockfile is created with the standard shape. The ``range``
+    field is written only when given, keeping old ``{version, source}``
+    entries valid.
+    """
+    lock = Path(lock_dir) / 'niko.lock'
+    try:
+        data = json.loads(lock.read_text(encoding='utf8')) if lock.is_file() else {}
+    except ValueError as e:
+        raise PackageError(f'cannot read {lock}: {e}')
+    if not isinstance(data, dict):
+        data = {}
+    pkgs = data.get('packages')
+    if not isinstance(pkgs, dict):
+        pkgs = {}
+        data['packages'] = pkgs
+    data.setdefault('version', 1)
+    data.setdefault('dependencies', {})
+    entry = {'version': version, 'source': source}
+    if range:
+        entry['range'] = range
+    pkgs[name] = entry
+    lock.write_text(json.dumps(data, indent=2, sort_keys=True) + '\n',
+                    encoding='utf8')
+    return lock

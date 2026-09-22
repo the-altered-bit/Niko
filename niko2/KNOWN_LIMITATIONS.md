@@ -240,20 +240,31 @@ generated code). Same value model as WASM (boxed values, f64 numbers).
 - **`import` must be at the top of the file** — not inside a `to` or a
   block (checker error: `import must be at the top of the file`).
 
-## Alpha 16 package manager limits
+## Alpha 19 package manager limits
 
-- **No registry server and no `publish` command.** Packages install from
-  a local directory or a git URL (`niko2 get <directory|git-url>`) only.
-  There is deliberately no package registry to query or push to.
-- **No version-range solving.** `niko2 get` installs exactly the version
-  described by the source's own `niko.toml`; `import "pkg:…"` takes no
-  version — the `niko.lock` pin (written by `niko2 lock`) decides, with
-  the newest cached version as fallback when there is no lockfile.
-- **`niko2 get` is the only command that uses the network.**
-  Compile/run/check/wasm/native/debug/lsp all resolve packages offline
-  from `~/.niko/packages` (override with `NIKO_PKG_CACHE`). A
-  pinned-but-evicted package (lock says 9.9.9, only 1.0.0 cached) is an
-  explicit error, not a silent fallback.
+- **No auth, no remote publish.** Registries can be local directories
+  or remote index URLs, but `niko2 publish` only publishes to local
+  directory registries — publishing to a remote registry is refused
+  with "publishing needs auth, which is not supported yet". There is
+  no registry account model at all.
+- **Transitive dependencies are not pinned in the lockfile.** Only
+  directly-installed packages get `niko.lock` pins (written by
+  `niko2 get <name>[@<range>]`, kept by `niko2 lock`); a transitive
+  dependency's exact version comes from the cache plus its declared
+  range, re-resolved on each fresh install.
+- **No version-range solving at import time.** `import "pkg:…"` takes no
+  version — the `niko.lock` pin decides, with the newest cached version
+  as fallback when there is no lockfile. The solver runs only in
+  `niko2 get` / `niko2 get --update`, which guarantee a satisfying
+  version is cached.
+- **A bare local directory named exactly like a package is treated as a
+  registry lookup.** Spell it `./dir` to force directory handling
+  (`niko2 get ./mydir`).
+- **`niko2 get` and `niko2 publish` are the only commands that use the
+  network.** Compile/run/check/wasm/native/debug/lsp all resolve
+  packages offline from `~/.niko/packages` (override with
+  `NIKO_PKG_CACHE`). A pinned-but-evicted package (lock says 9.9.9,
+  only 1.0.0 cached) is an explicit error, not a silent fallback.
 - **The cache is a plain directory copy.** To pick up upstream changes
   from a git source, run `niko2 get <url> --force` again (re-locking
   keeps the old pin if you don't want the new version — `niko2 lock`
@@ -263,3 +274,5 @@ generated code). Same value model as WASM (boxed values, f64 numbers).
   `niko.py` at the repo root.
 - **Flags after positionals:** `niko2 get <src> --force` works;
   `niko2 get --force <src>` is rejected (pre-existing argparse quirk).
+  Exception: `niko2 get --update <name>` is special-cased via an argv
+  pre-scan, so both flag positions work for `--update`.

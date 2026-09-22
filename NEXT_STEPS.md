@@ -170,6 +170,32 @@ match cases in `tests/test_formatter.py`.
   module file, `pkg:` via a lockfile pin, `./` import inside the package,
   missing-module graceful null, alias pin). Full suite green. See
   `RELEASE_NOTES_ALPHA17.md`.
+- **Alpha 19 is complete**: package registry + version-range solving.
+  `niko2/semver.py` (range grammar: `*`, exact, partials, npm-style
+  `^`/`~`, comparators, comma AND; `max_satisfying` solver,
+  `SemverError`), `niko2/registry.py` (registry protocol: local-dir
+  registry `<dir>/index.json` + `tarballs/`, or a remote index URL;
+  index format spec in the module docstring; sha256 mandatory,
+  mismatch = hard error with bad download deleted; `NIKO_REGISTRY`
+  env wins over `~/.niko/config.toml`). CLI: `niko2 get
+  <name>[@<range>]` (newest satisfying version + lockfile pin
+  `{version, source: "registry:<spec>", range}`), `niko2 get --update
+  <name>` (re-resolve via the pin's range; upgrades + re-pins, else
+  friendly no-op; both flag positions work via an argv pre-scan for
+  the pre-existing argparse quirk), `niko2 publish [--registry
+  <dir>] [--force]` (tarball excludes `.git/`/`__pycache__`/`*.pyc`,
+  atomic index update; remote publish refused: "publishing needs auth
+  — not supported yet"). Disambiguation: bare `<name>`/`<name>@<range>`
+  = registry lookup (a same-named local dir needs `./`; unparseable
+  range falls through to dir/git handling). Manifest `[dependencies]`
+  table (name → range) installs the full transitive closure from the
+  same registry, skipping already-satisfied cached versions;
+  transitive deps are NOT pinned in the lockfile. No solving at
+  import time — imports stay version-free. Tests: new
+  `tests/test_registry.py` (hermetic: local-dir registry fixture,
+  sandboxed cache, no network; real `~/.niko` asserted untouched).
+  Full suite green. See `RELEASE_NOTES_ALPHA19.md` /
+  `ALPHA19_DESIGN.md`.
 - **Alpha 18 is complete**: debugger upgrades — multi-file debugging,
   `ask` under the debugger, and `evaluate`. The debugger compiles through
   the module pipeline, so breakpoints/stepping/stack traces follow

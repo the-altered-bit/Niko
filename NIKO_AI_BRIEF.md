@@ -191,8 +191,19 @@ The import string takes no version; versions live in `niko.lock`
 (`niko2 lock` pins them and never silently upgrades). Resolution is:
 lockfile pin → newest cached version in `~/.niko/packages` (override with
 `NIKO_PKG_CACHE`) → a friendly `unknown package` error telling you to run
-`niko2 get` first. Everything else resolves packages offline. There is no
-registry server and no version-range solving; `examples/packages/`
+`niko2 get` first. Everything else resolves packages offline.
+
+Packages can also come from a **registry**: `niko2 publish
+[--registry <dir>]` publishes the current package (local-directory
+registries only — no auth yet), and `niko2 get <name>` / `niko2 get
+<name>@<range>` installs the newest version satisfying the range
+(`*`, `1.2.3`, `1.2`, npm-style `^1.2.3`/`~1.2.3`, comparators,
+comma AND), writing the pin `{version, source, range}` to `niko.lock`.
+`niko2 get --update <name>` upgrades to the newest matching version.
+The registry is selected by `NIKO_REGISTRY` (index URL, `file://` URL,
+or local dir) or `~/.niko/config.toml` `[registry] url`. Packages
+declare `[dependencies]` (name → range) in `niko.toml`; `get` installs
+the transitive closure from the same registry. `examples/packages/`
 holds a worked example.
 
 ## 5. Error messages (part of the language design)

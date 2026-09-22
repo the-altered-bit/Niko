@@ -1,4 +1,5 @@
 import argparse
+import sys
 from pathlib import Path
 from .parser import parse,ParseError,format_parse_error
 from .diagnostics import format_diagnostic
@@ -96,14 +97,27 @@ def run(src,name='<memory>'):
 
 def main():
     ap=argparse.ArgumentParser(prog='niko2',description='Niko 2 compiler/interpreter')
-    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','deps','lock','get','lsp','debug','wasm','native'])
+    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','deps','lock','get','publish','lsp','debug','wasm','native'])
     ap.add_argument('file',nargs='?')
-    ap.add_argument('--force',action='store_true',help='(get) reinstall the package even if it is already cached')
+    ap.add_argument('--force',action='store_true',help='(get/publish) reinstall the package even if it is already cached/published')
+    ap.add_argument('--update',action='store_true',help='(get) re-resolve a registry package to the newest matching version and upgrade the install + lockfile pin')
+    ap.add_argument('--registry',help='(publish) registry directory or index URL; default from NIKO_REGISTRY or ~/.niko/config.toml')
     ap.add_argument('-o','--output',help='output file (wasm: <file>.wasm, native: <file>)')
     ap.add_argument('--emit-c',action='store_true',help='(native) also write the generated C source next to the output')
     ap.add_argument('--run',action='store_true',help='run the .wasm with node after building')
     ap.add_argument('--version',action='version',version=f'Niko {VERSION}')
-    a=ap.parse_args()
+    # Argparse quirk (pre-existing): with two nargs='?' positionals, an
+    # option sitting between them breaks parsing, so `niko2 get --update
+    # <name>` would die as "unrecognized arguments". Hoist --update out
+    # of the argv for the get command before argparse sees it; the
+    # trailing form `niko2 get <name> --update` already parses fine.
+    argv=sys.argv[1:]
+    update_requested=False
+    if argv[:1]==['get'] and '--update' in argv:
+        argv=[x for x in argv if x!='--update']
+        update_requested=True
+    a=ap.parse_args(argv)
+    a.update=a.update or update_requested
     if a.command=='lsp':
         from .lsp import main as lsp_main; return lsp_main()
     if a.command=='debug':
@@ -153,13 +167,54 @@ def main():
             print(f'Niko error: {e}'); return 1
         print(f'✓ wrote {lock_path}')
         return 0
-    # Alpha 16: install a package into the local cache. The ONLY command
-    # that may touch the network (git clone); everything else resolves
-    # packages offline from the cache.
+    # Alpha 16: install a package into the local cache. Along with
+    # `publish` below, the ONLY commands that may touch the network;
+    # everything else resolves packages offline from the cache.
     if a.command=='get':
         if not a.file:
-            print('Usage: niko2 get <package-directory|git-url> [--force]'); return 2
-        from .packages import install_package, PackageError
+            print('Usage: niko2 get <package-directory|git-url> [--force] | niko2 get <name>[@<range>] [--force] | niko2 get --update <name>'); return 2
+        from .packages import install_package, PackageError, find_lock_dir, write_package_pin
+        if a.update:
+            # Alpha 19: re-resolve a registry package to the newest
+            # matching version; upgrade the install + the lockfile pin.
+            from .registry import update_package
+            try:
+                upd=update_package(a.file)
+            except PackageError as e:
+                print(f'Niko error: {e}'); return 1
+            if upd.changed:
+                print(f'✓ updated {upd.name} {upd.old_version} → {upd.new_version} ({upd.path})')
+            else:
+                print(f'{upd.name} is already at the newest matching version ({upd.new_version})')
+            return 0
+        from .registry import (is_registry_spec, split_registry_spec,
+                                install_from_registry, resolve_registry)
+        if is_registry_spec(a.file):
+            # Alpha 19: `niko2 get <name>` / `niko2 get <name>@<range>` --
+            # install the newest registry version satisfying the range.
+            # The disambiguation rule lives in registry.is_registry_spec;
+            # anything else falls through to the Alpha 16 dir/git path.
+            try:
+                name,range_spec=split_registry_spec(a.file)
+                reg=resolve_registry()
+                result=install_from_registry(name, range_spec, force=a.force,
+                                             registry=reg.spec)
+            except PackageError as e:
+                print(f'Niko error: {e}'); return 1
+            m=result.manifest
+            # `get name@range` writes/updates the pin: nearest enclosing
+            # niko.lock, else a new one in the current directory.
+            try:
+                lock_dir=find_lock_dir('.') or Path('.').resolve()
+                write_package_pin(lock_dir, m.name, m.version,
+                                  f'registry:{reg.spec}', range_spec)
+            except PackageError as e:
+                print(f'Niko error: {e}'); return 1
+            if result.fresh:
+                print(f'✓ installed {m.name} {m.version} → {result.path}')
+            else:
+                print(f'{m.name} {m.version} is already installed ({result.path}) -- use --force to reinstall')
+            return 0
         try:
             result=install_package(a.file, force=a.force)
         except PackageError as e:
@@ -170,8 +225,18 @@ def main():
         else:
             print(f'{m.name} {m.version} is already installed ({result.path}) -- use --force to reinstall')
         return 0
+    # Alpha 19: publish the package in the current directory to a registry
+    # (local directory registries only -- remote needs auth, unsupported).
+    if a.command=='publish':
+        from .registry import publish_package, PackageError
+        try:
+            info=publish_package('.', registry=a.registry, force=a.force)
+        except PackageError as e:
+            print(f'Niko error: {e}'); return 1
+        print(f'✓ published {info["name"]} {info["version"]} to {info["spec"]}')
+        return 0
     if not a.file:
-        print('Usage: niko2 run <file.niko|.nikoir> | niko2 check <file.niko> | niko2 format <file.niko> | niko2 deps [folder] | niko2 lock [folder] | niko2 get <package-directory|git-url> [--force] | niko2 init <folder> | niko2 lsp | niko2 debug | niko2 wasm <file.niko> [-o out.wasm] [--run] | niko2 native <file.niko> [-o out] [--run] [--emit-c]'); return 2
+        print('Usage: niko2 run <file.niko|.nikoir> | niko2 check <file.niko> | niko2 format <file.niko> | niko2 deps [folder] | niko2 lock [folder] | niko2 get <package-directory|git-url> [--force] | niko2 get <name>[@<range>] [--force] | niko2 get --update <name> | niko2 publish [--registry <dir>] [--force] | niko2 init <folder> | niko2 lsp | niko2 debug | niko2 wasm <file.niko> [-o out.wasm] [--run] | niko2 native <file.niko> [-o out] [--run] [--emit-c]'); return 2
 
     # Alpha 8: compile to WebAssembly.
     if a.command=='wasm':
