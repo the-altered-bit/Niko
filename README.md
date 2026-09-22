@@ -95,3 +95,22 @@ as alias` works as in scripts — relative paths resolve against the
 directory where you started the REPL, and each module initializes once
 per session. Commands: `:help`, `:quit` / `:exit`, `:reset` (forgets
 everything). Ctrl-D leaves; Ctrl-C discards the current block.
+
+## Niko 2 Alpha 23 — module-aware editor diagnostics
+
+The language server's live diagnostics now understand multi-file
+programs: `import "lib/util.niko" as util` / `util.shout("hi")` no
+longer gets phantom `unknown name` squiggles, nor do names merged in
+by `use`. An unknown attribute on a module alias (`util.nope`) is
+flagged on the attribute's line, an unresolvable import produces
+exactly one diagnostic on the import line, and type errors point at
+the module file's own line — not the entry's. Unsaved module buffers
+override the on-disk version, so fixes show up before you save.
+Single-file documents keep the old zero-disk-IO behavior.
+
+Also in this alpha: a breakpoint on a call line no longer stops twice
+(the debugger's old same-line re-fire is fixed — loops still stop once
+per iteration), `niko2 format` prints `use "a.niko"` without doubled
+quotes, and `use` inside a function is now a checker error (`'use' is
+only allowed at the top of a file, not inside a function`) instead of
+a silent no-op.

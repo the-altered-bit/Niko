@@ -667,13 +667,10 @@ def test_use_under_debugger():
             assert by_name['offset']['value'] == '5', by_name
 
             # step back out: lands in the entry file on the call line.
-            # (Clear the entry breakpoint first: the call line's STORE
-            # still carries line 2, so the armed breakpoint would re-fire
-            # on the way out -- pre-existing debugger behavior, not use
-            # specific.)
-            client.request('setBreakpoints', {
-                'source': {'name': 'main.niko', 'path': main_p},
-                'breakpoints': []})
+            # Alpha 23: the entry breakpoint stays armed -- the debugger
+            # no longer re-fires it on the post-call STORE (same
+            # statement, later instruction), so the step-out completes
+            # with reason 'step' instead of a second 'breakpoint' stop.
             client.request('stepOut')
             stepped2 = client.wait_event('stopped')
             assert stepped2['reason'] == 'step', stepped2
@@ -715,3 +712,62 @@ def test_use_under_debugger():
 
 
 test_use_under_debugger()
+
+
+def test_no_breakpoint_refire_on_call_line():
+    """Alpha 23: a breakpoint on a call line fires once per visit.
+
+    Every instruction of one statement carries the statement's line
+    number, so the post-call STORE used to re-fire the armed breakpoint
+    when the call returned (after step-in + continue, or after
+    step-out). The debugger now treats a *different instruction* on the
+    same (frame, line) as the same visit and does not stop again; loop
+    iterations re-execute the *same* instruction objects, so they still
+    re-fire (covered by the repeat-loop hits in the first test above).
+    """
+    workdir, shutil = _alpha18_workdir()
+    try:
+        main = workdir / 'main.niko'
+        main.write_text('to bump with x:\n'
+                        '    give back x + 1\n'
+                        'set r to bump(10)\n'
+                        'say r\n')
+        main_p = str(main.resolve())
+        client = TimedClient()
+        try:
+            client.request('initialize', {'adapterID': 'niko-test'})
+            client.wait_event('initialized')
+            client.request('launch', {'program': main_p})
+            bp = client.request('setBreakpoints', {
+                'source': {'name': 'main.niko', 'path': main_p},
+                'breakpoints': [{'line': 3}]})
+            assert bp['breakpoints'] == [{'verified': True, 'line': 3}], bp
+            client.request('configurationDone')
+
+            # the breakpoint fires once on the call line
+            stopped = client.wait_event('stopped')
+            assert stopped['reason'] == 'breakpoint', stopped
+
+            # step into the call, then continue: the call returns
+            # through the post-call STORE on line 3, which must NOT
+            # stop a second time
+            client.request('stepIn')
+            stepped = client.wait_event('stopped')
+            assert stepped['reason'] == 'step', stepped
+            trace = client.request('stackTrace', {'threadId': 1})
+            assert trace['stackFrames'][0]['name'] == 'bump', trace
+            client.request('continue')
+            client.wait_event('continued')
+            client.wait_event('terminated')
+            outs = client.outputs()
+            assert any(o.strip() == '11' for o in outs), outs
+
+            client.request('disconnect')
+            print('test_dap.py (Alpha 23): no breakpoint re-fire on call line passed')
+        finally:
+            client.close()
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+test_no_breakpoint_refire_on_call_line()

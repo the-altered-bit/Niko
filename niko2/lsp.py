@@ -4,7 +4,15 @@ Start it with `niko2 lsp`. It speaks enough of the Language Server
 Protocol for a good editing experience in any LSP-capable editor:
 
 - `textDocument/publishDiagnostics` — parse errors and type errors, with
-  the line/column positions from `niko2/diagnostics.py`
+  the line/column positions from `niko2/diagnostics.py`. Alpha 23: when
+  the open file has top-level `import`/`use` statements it is checked
+  through the module pipeline (`build_module_graph` + `check_units`),
+  so import aliases and `use`d names resolve exactly as at compile time
+  (no phantom unknown-name errors); an `alias.attr` naming something the
+  module doesn't export gets its own diagnostic; an unresolvable import
+  or use yields exactly one diagnostic on its line; errors inside module
+  files are published against the right file/line. Diagnostics are
+  read-only: they never write files and never touch the network.
 - `textDocument/completion` — keywords, builtins, and names defined in
   the file
 - `textDocument/hover` — builtin docs and inferred types of your names;
@@ -40,8 +48,11 @@ from .parser import parse, ParseError
 from .typecheck import check, TypeErrorNiko, BUILTIN_NAMES
 from .formatter import format_program
 from .symbols import collect_symbols, find_symbol, all_names, _infer
+from .diagnostics import Diagnostic
 from .ast import Node, ImportStmt, UseStmt, AttrExpr, NameExpr, SetStmt, FunctionDef
-from .modules import resolve_import, resolve_use, ImportErrorNiko
+from .modules import (resolve_import, resolve_use, ImportErrorNiko,
+                      build_module_graph, check_units,
+                      _unit_exports as _module_unit_exports)
 
 VERSION = '2.0.0-alpha.7'
 
@@ -286,17 +297,111 @@ def _diagnostic(exc):
     }
 
 
-def _analyze(text):
-    """Return (diagnostics, tree-or-None)."""
+def _has_module_stmts(tree):
+    """True when the entry needs the module pipeline: a top-level
+    `import` or `use` statement is present."""
+    return any(isinstance(n, (ImportStmt, UseStmt)) for n in tree.body)
+
+
+def _lint_alias_attrs(graph):
+    """[(path, Diagnostic)] for `alias.attr` where `attr` is not one of
+    the imported module's exports.
+
+    The shared checker types every import alias as `map` (attribute
+    access is `any`), so without this the LSP would stay silent on
+    `m.nope` -- a name that fails at runtime. This lint is LSP-local
+    and read-only: compile-time behavior is unchanged. `find_symbol`
+    keeps it precise: when `m` is shadowed by a local binding at the
+    attribute's line, the lint stays quiet.
+    """
+    out = []
+    by_path = {u.path: u for u in graph}
+    exports = _module_unit_exports(graph)
+    for unit in graph:
+        aliases = {}
+        for alias, target, _line in unit.imports:
+            tgt = by_path.get(target)
+            if tgt is not None:
+                aliases[alias] = tgt
+        if not aliases:
+            continue
+        try:
+            root = collect_symbols(unit.tree)
+        except Exception:
+            continue
+        for node in _iter_nodes(unit.tree):
+            if not (isinstance(node, AttrExpr)
+                    and isinstance(node.obj, NameExpr)
+                    and node.obj.name in aliases):
+                continue
+            sym = find_symbol(root, node.obj.name, node.line)
+            if sym is None or sym.kind != 'module':
+                continue  # shadowed by a local: not the import alias
+            if node.name not in exports[aliases[node.obj.name].key]:
+                out.append((str(unit.path), Diagnostic(
+                    f'unknown attribute "{node.name}" on module '
+                    f'"{node.obj.name}"',
+                    line=node.line)))
+    return out
+
+
+def _analyze(text, entry_path=None, source_overrides=None):
+    """Return ({absolute path: [diagnostics]}, entry tree or None).
+
+    Alpha 23: when the entry file has top-level `import`/`use`
+    statements, it is checked through the module pipeline
+    (`build_module_graph` + `check_units`) instead of the old
+    single-file check, so import aliases and `use`d names resolve
+    exactly as they do at compile time. Diagnostics are grouped by
+    file, so errors inside module files attribute to the right
+    file/line. `source_overrides` supplies in-memory trees for other
+    open documents (unsaved edits included); anything not overridden
+    is read from disk, read-only -- diagnostics never write files and
+    never touch the network (package-cache reads are local).
+
+    Without module statements -- or without a file path, as for an
+    unsaved document -- this is the old single-file check: no disk
+    reads at all.
+    """
+    if entry_path is not None:
+        entry_path = str(Path(entry_path).resolve())
+    diags = {}
+
+    def add(path, exc):
+        diags.setdefault(str(path), []).append(_diagnostic(exc))
+
     try:
         tree = parse(text)
     except ParseError as e:
-        return [_diagnostic(e)], None
+        e.path = entry_path
+        add(entry_path or '<memory>', e)
+        return diags, None
+    if entry_path is None or not _has_module_stmts(tree):
+        try:
+            check(tree, [])
+        except TypeErrorNiko as e:
+            add(entry_path or '<memory>', e)
+        return diags, tree
     try:
-        check(tree, [])
+        graph = build_module_graph(entry_path, entry_tree=tree,
+                                   source_overrides=source_overrides)
+    except ImportErrorNiko as e:
+        # Unresolvable import/use, or an import/use cycle: exactly one
+        # diagnostic, on the offending line in the importing file, and
+        # no cascade of follow-on errors.
+        add(e.path or entry_path, e)
+        return diags, tree
+    except ParseError as e:
+        add(e.path or entry_path, e)
+        return diags, tree
+    try:
+        check_units(graph)
     except TypeErrorNiko as e:
-        return [_diagnostic(e)], tree
-    return [], tree
+        add(e.path or entry_path, e)
+        return diags, tree
+    for path, attr_exc in _lint_alias_attrs(graph):
+        add(path, attr_exc)
+    return diags, tree
 
 
 class Server:
@@ -305,20 +410,78 @@ class Server:
         self.stdout = stdout
         self.docs = {}          # uri -> text
         self.trees = {}         # uri -> parsed tree (or None)
+        self._diags_owner = {}  # uri -> root uri whose analysis last
+                                # published diagnostics for it
         self._id_seq = 0
 
     def send(self, obj):
         write_message(self.stdout, obj)
 
+    def _open_overrides(self, uri):
+        """{resolved Path: parsed tree} for every other open document
+        that parses, so module-aware diagnostics see unsaved edits in
+        module files instead of their on-disk copies. A document that
+        fails to parse is left out -- its own diagnostics already show
+        the parse error, and the graph falls back to the disk copy."""
+        overrides = {}
+        for ouri, otext in self.docs.items():
+            if ouri == uri:
+                continue
+            opath = _uri_to_path(ouri)
+            if opath is None:
+                continue
+            try:
+                otree = parse(otext)
+            except ParseError:
+                continue
+            overrides[Path(opath).resolve()] = otree
+        return overrides or None
+
     def _notify_diagnostics(self, uri):
         text = self.docs.get(uri, '')
-        diags, tree = _analyze(text)
+        entry_path = _uri_to_path(uri)
+        overrides = None
+        if entry_path is not None:
+            # Only parse the other open documents when the entry
+            # actually needs the module pipeline.
+            try:
+                quick = parse(text)
+            except ParseError:
+                quick = None
+            if quick is not None and _has_module_stmts(quick):
+                overrides = self._open_overrides(uri)
+        diags_by_path, tree = _analyze(text, entry_path, overrides)
         self.trees[uri] = tree
-        self.send({
-            'jsonrpc': '2.0',
-            'method': 'textDocument/publishDiagnostics',
-            'params': {'uri': uri, 'diagnostics': diags},
-        })
+        resolved_entry = (str(Path(entry_path).resolve())
+                          if entry_path is not None else None)
+        publish = {}
+        for path, ds in diags_by_path.items():
+            if path == resolved_entry or (
+                    resolved_entry is None and path == '<memory>'):
+                publish[uri] = ds
+            elif path != '<memory>':
+                publish[_path_to_uri(path)] = ds
+        publish.setdefault(uri, [])
+        for u, ds in publish.items():
+            self.send({
+                'jsonrpc': '2.0',
+                'method': 'textDocument/publishDiagnostics',
+                'params': {'uri': u, 'diagnostics': ds},
+            })
+            self._diags_owner[u] = uri
+        # Clear diagnostics this document's analysis published before
+        # that are gone now (a fixed import, a clean module file, ...).
+        # Diagnostics owned by another open document's analysis are
+        # left alone -- that analysis refreshes them when its own
+        # document changes.
+        for u, owner in list(self._diags_owner.items()):
+            if owner == uri and u not in publish:
+                self.send({
+                    'jsonrpc': '2.0',
+                    'method': 'textDocument/publishDiagnostics',
+                    'params': {'uri': u, 'diagnostics': []},
+                })
+                del self._diags_owner[u]
 
     def _tree(self, uri):
         tree = self.trees.get(uri)

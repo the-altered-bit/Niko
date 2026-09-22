@@ -189,7 +189,7 @@ def resolve_use(raw_module, base_dir, line, importer_path):
                           line=line, path=str(importer_path))
 
 
-def build_module_graph(entry_path, entry_tree=None):
+def build_module_graph(entry_path, entry_tree=None, source_overrides=None):
     """Parse every module reachable from entry_path.
 
     Returns [ModuleUnit] in dependency order (dependencies first, entry
@@ -198,6 +198,12 @@ def build_module_graph(entry_path, entry_tree=None):
     unqualified, transitively). A file reached both ways keeps the kind of
     its first visit; the other statement then binds against that unit's
     result record.
+
+    `source_overrides` maps resolved absolute Paths to already-parsed
+    Program trees: the LSP passes the in-memory text of open documents
+    here so diagnostics reflect unsaved edits instead of the on-disk
+    copy. A document that fails to parse is simply left out of the map
+    and the on-disk version is used.
 
     Detects cycles and raises ImportErrorNiko naming the cycle
     (`import cycle: …` / `use cycle: …`); missing/unreadable files and bad
@@ -228,6 +234,8 @@ def build_module_graph(entry_path, entry_tree=None):
         try:
             if entry_tree is not None and path == entry_path:
                 tree = entry_tree
+            elif source_overrides and path in source_overrides:
+                tree = source_overrides[path]
             else:
                 try:
                     src = path.read_text(encoding='utf8')

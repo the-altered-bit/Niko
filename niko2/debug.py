@@ -69,6 +69,8 @@ class Debugger:
         self._step = None               # None | 'in' | 'over' | 'out'
         self._step_depth = 0
         self._last_key = None
+        self._last_bp_stop = None       # (frame, path, line, ins) of the
+                                        # last real breakpoint stop (Alpha 23)
         self._entered = False
         self.stop_on_entry = False
         self._killed = False
@@ -90,6 +92,9 @@ class Debugger:
             self.breakpoints[str(path)] = dict(conds)
         else:
             self.breakpoints[str(path)] = {line: None for line in conds}
+        # A changed breakpoint set invalidates the re-fire guard below:
+        # fail open (a stop) rather than swallow a stop the user expects.
+        self._last_bp_stop = None
 
     def breakpoint_lines(self):
         return sorted(self.breakpoints.get(self.path, ()))
@@ -164,19 +169,42 @@ class Debugger:
         self._last_key = key
         depth = len(frames)
         reason = None
+        frame_path = self._frame_path(frame)
+        bp_line = line in self.breakpoints.get(frame_path, ())
+        bp_suppressed = False
         if self.stop_on_entry and not self._entered:
             self._entered = True
             reason = 'entry'
-        elif line in self.breakpoints.get(self._frame_path(frame), ()):
-            cond = self.breakpoints[self._frame_path(frame)][line]
+        elif bp_line:
+            cond = self.breakpoints[frame_path][line]
             if self._condition_holds(frames, ins, cond):
-                reason = 'breakpoint'
-        elif self._step == 'in':
-            reason = 'step'
-        elif self._step == 'over' and depth <= self._step_depth:
-            reason = 'step'
-        elif self._step == 'out' and depth < self._step_depth:
-            reason = 'step'
+                last = self._last_bp_stop
+                # Alpha 23: a breakpoint on a call line must not re-fire
+                # when the call returns. Every instruction of one
+                # statement carries the statement's line number, so the
+                # post-call STORE is a *different instruction* on the
+                # same (frame, line) as the stop we already reported --
+                # the same visit to the line, not a new one. Loop
+                # iterations re-execute the *same* instruction objects,
+                # so they still re-fire exactly as before.
+                if (last is not None and last[0] is frame
+                        and last[1] == frame_path and last[2] == line
+                        and last[3] is not ins):
+                    bp_suppressed = True
+                else:
+                    self._last_bp_stop = (frame, frame_path, line, ins)
+                    reason = 'breakpoint'
+        if reason is None and not (bp_line and not bp_suppressed):
+            # Unchanged precedence: an armed breakpoint line (even with a
+            # falsy condition) still swallows a pending step, exactly as
+            # before -- only the suppressed same-statement re-fire yields
+            # so the step can complete.
+            if self._step == 'in':
+                reason = 'step'
+            elif self._step == 'over' and depth <= self._step_depth:
+                reason = 'step'
+            elif self._step == 'out' and depth < self._step_depth:
+                reason = 'step'
         if reason is not None:
             self._pause(reason, frames, ins)
 

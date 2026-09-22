@@ -34,3 +34,18 @@ with tempfile.TemporaryDirectory() as tmp:
     from niko2.parser import parse
     parse(formatted)
     print('formatter OK')
+
+
+# Alpha 23: `use` renders with plain double quotes (used to double them:
+# `use "a.niko"` came out as `use '"a.niko"'`).
+src_use = 'use "a.niko"\nuse \'b.niko\'\nsay 1\n'
+with tempfile.TemporaryDirectory() as tmp:
+    p = pathlib.Path(tmp) / 'use.niko'
+    p.write_text(src_use, encoding='utf8')
+    res = run('format', str(p))
+    assert res.returncode == 0, res.stderr or res.stdout
+    assert 'use "a.niko"' in res.stdout, res.stdout
+    assert 'use "b.niko"' in res.stdout, res.stdout
+    assert '\'"a.niko"\'' not in res.stdout, res.stdout
+    parse(res.stdout)
+    print('formatter use-quotes OK')

@@ -168,7 +168,13 @@ class Checker:
                 self.scopes.pop()
             if n.otherwise:
                 self.scopes.append({}); self.block(n.otherwise,return_type); self.scopes.pop()
-        elif isinstance(n,UseStmt): pass
+        elif isinstance(n,UseStmt):
+            # Alpha 23: `use` merges names into the file's top-level
+            # scope through the module pipeline; inside a function body
+            # it would be silently ignored by desugaring, so reject it
+            # loudly -- same rule as `import` below.
+            if len(self.scopes) > 1:
+                self.error(n.line, "'use' is only allowed at the top of a file, not inside a function")
         elif isinstance(n,ImportStmt):
             # Alpha 13: `import "…" as alias` binds the alias to the module's
             # export record (typed as a map; attribute access is `any`).

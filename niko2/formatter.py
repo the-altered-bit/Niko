@@ -126,7 +126,13 @@ def format_stmt(node, indent=0):
             return format_match_expr(node.expr, f'give back match {format_expr(node.expr.expr)}:', indent)
         return f'{pad}give back {format_expr(node.expr)}' if node.expr is not None else f'{pad}give back'
     if isinstance(node, UseStmt):
-        return f'{pad}use {node.module!r}'
+        # Alpha 23: the parser keeps the raw text (quotes included) in
+        # `node.module`; strip one surrounding quote pair so the output
+        # reads `use "a.niko"`, not `use '"a.niko"'`.
+        mod = node.module.strip()
+        if len(mod) >= 2 and mod[0] == mod[-1] and mod[0] in '"\'':
+            mod = mod[1:-1]
+        return f'{pad}use "{mod}"'
     if isinstance(node, ImportStmt):
         return f'{pad}import "{node.path}" as {node.alias}'
     if isinstance(node, StopStmt):

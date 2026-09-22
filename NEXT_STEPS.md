@@ -243,6 +243,21 @@ match cases in `tests/test_formatter.py`.
   `test_use_under_debugger` DAP case, new LSP definition/hover
   assertions, new REPL `use-in-repl` case. Full suite green. See
   `RELEASE_NOTES_ALPHA22.md` / `ALPHA22_DESIGN.md`.
+- **Alpha 23 is complete**: module-aware editor diagnostics. `niko2
+  lsp` now analyzes the whole module graph: import aliases and
+  `use`-merged names no longer get phantom `unknown name` squiggles,
+  `m.nope` is flagged on the attribute's line, unresolvable imports
+  yield exactly one diagnostic on the import line, and type errors
+  attribute to the right file/line; unsaved module buffers override
+  disk. Single-file documents keep the old zero-disk-IO fast path.
+  Also fixed: the debugger's same-line breakpoint re-fire (breakpoint
+  on a call line now fires once, loops still re-fire per iteration),
+  `niko2 format`'s doubled quotes on `use`, and `use` inside a
+  function is now an error (was silently ignored). Tests: 8 new
+  `tests/test_lsp.py` Alpha 23 checks, new
+  `test_no_breakpoint_refire_on_call_line` DAP case, formatter `use`
+  quote case, `use`-in-function checker + CLI cases. Full suite green.
+  See `RELEASE_NOTES_ALPHA23.md` / `ALPHA23_DESIGN.md`.
 - **Alpha 19 is complete**: package registry + version-range solving.
   `niko2/semver.py` (range grammar: `*`, exact, partials, npm-style
   `^`/`~`, comparators, comma AND; `max_satisfying` solver,

@@ -209,16 +209,22 @@ try:
         client2.notify('textDocument/didOpen', {'textDocument': {
             'uri': main_uri, 'languageId': 'niko', 'version': 1,
             'text': main_src}})
-        # pull messages until we see publishDiagnostics (an unresolvable
-        # import still types as map, so expect zero diagnostics)
+        # pull messages until we see publishDiagnostics for main.niko.
+        # Alpha 23: the unresolvable `import "missing.niko" as n`
+        # yields exactly one diagnostic on its own line (0-based line
+        # 2); `say n.anything` produces nothing further (no cascade).
         diags = None
         for _ in range(20):
             msg = client2._read()
-            if msg.get('method') == 'textDocument/publishDiagnostics':
+            if (msg.get('method') == 'textDocument/publishDiagnostics'
+                    and msg['params']['uri'] == main_uri):
                 diags = msg['params']['diagnostics']
                 break
             client2.notifications.append(msg)
-        assert diags == [], f'expected no diagnostics, got {diags}'
+        assert diags is not None, 'no publishDiagnostics arrived'
+        assert len(diags) == 1, f'expected 1 diagnostic, got {diags}'
+        assert diags[0]['range']['start']['line'] == 2, diags[0]
+        assert 'cannot find module' in diags[0]['message'], diags[0]
 
         def goto(uri, line, char):
             return client2.request('textDocument/definition', {
@@ -347,15 +353,21 @@ try:
         diags = None
         for _ in range(20):
             msg = client3._read()
-            if msg.get('method') == 'textDocument/publishDiagnostics':
+            if (msg.get('method') == 'textDocument/publishDiagnostics'
+                    and msg['params']['uri'] == main_uri):
                 diags = msg['params']['diagnostics']
                 break
             client3.notifications.append(msg)
-        # Known Alpha 22 gap: editor diagnostics run the plain checker,
-        # which doesn't know `use`-merged names -- `double` is flagged
-        # unknown even though it resolves at compile time.
+        # Alpha 23: editor diagnostics run through the module pipeline,
+        # so `double` (merged in by `use`) is no longer flagged as an
+        # unknown name; the unresolvable `use "missing.niko"` yields
+        # exactly one diagnostic on its own line (0-based line 1).
         assert diags is not None, 'no publishDiagnostics arrived'
-        assert any('unknown name "double"' in d['message'] for d in diags), diags
+        assert not any('unknown name' in d['message']
+                       for d in diags), diags
+        assert len(diags) == 1, f'expected 1 diagnostic, got {diags}'
+        assert diags[0]['range']['start']['line'] == 1, diags[0]
+        assert 'cannot find module' in diags[0]['message'], diags[0]
 
         def goto(uri, line, char):
             return client3.request('textDocument/definition', {
@@ -404,3 +416,139 @@ try:
         client3.close()
 finally:
     shutil.rmtree(fixture22, ignore_errors=True)
+
+
+
+# --- Alpha 23: module-aware editor diagnostics ---------------------------
+fixture23 = tempfile.mkdtemp(prefix='niko-lsp-diag-')
+try:
+    proj = pathlib.Path(fixture23) / 'proj'
+    (proj / 'lib').mkdir(parents=True)
+    (proj / 'lib' / 'math.niko').write_text(
+        'to add with a, b:\n'
+        '    give back a + b\n'
+        '\n'
+        'set tau to 6.28\n',
+        encoding='utf8')
+    (proj / 'lib' / 'helper.niko').write_text(
+        'to double with x:\n'
+        '    give back x * 2\n',
+        encoding='utf8')
+    (proj / 'lib' / 'broken.niko').write_text(
+        'set x: number to "oops"\n',
+        encoding='utf8')
+
+    client4 = Client()
+    try:
+        client4.request('initialize', {'processId': None, 'rootUri': None, 'capabilities': {}})
+        client4.notify('initialized', {})
+
+        main_uri = (proj / 'main.niko').as_uri()
+        broken_uri = (proj / 'lib' / 'broken.niko').as_uri()
+
+        def change_main(text, version):
+            client4.notify('textDocument/didChange', {
+                'textDocument': {'uri': main_uri, 'version': version},
+                'contentChanges': [{'text': text}]})
+
+        def sync_diags(expect_uris, tries=60):
+            """Read until a publishDiagnostics has arrived for every uri
+            in `expect_uris`; return {uri: diagnostics} for all
+            publishDiagnostics seen on the way."""
+            out = {}
+            for _ in range(tries):
+                msg = client4._read()
+                if msg.get('method') == 'textDocument/publishDiagnostics':
+                    out[msg['params']['uri']] = msg['params']['diagnostics']
+                    if set(expect_uris) <= set(out):
+                        return out
+                else:
+                    client4.notifications.append(msg)
+            raise AssertionError(
+                f'publishDiagnostics missing for {set(expect_uris) - set(out)}')
+
+        # (a)+(b): import aliases and `use`d names resolve through the
+        # module pipeline -- no phantom unknown-name diagnostics
+        client4.notify('textDocument/didOpen', {'textDocument': {
+            'uri': main_uri, 'languageId': 'niko', 'version': 1,
+            'text': 'import "lib/math.niko" as m\n'
+                    'use "lib/helper.niko"\n'
+                    'say m.add(1, 2)\n'
+                    'say double(21)\n'}})
+        got = sync_diags({main_uri})
+        assert got[main_uri] == [], f'expected no diagnostics, got {got}'
+
+        # (c): an unknown attribute on the alias still surfaces, on the
+        # attribute's line
+        change_main('import "lib/math.niko" as m\n'
+                    'say m.nope\n', 2)
+        got = sync_diags({main_uri})
+        diags = got[main_uri]
+        assert len(diags) == 1, f'expected 1 diagnostic, got {diags}'
+        assert diags[0]['range']['start']['line'] == 1, diags[0]
+        assert 'unknown attribute "nope"' in diags[0]['message'], diags[0]
+
+        # (d): an unresolvable import yields exactly one diagnostic, on
+        # the import line -- no cascade
+        change_main('import "missing.niko" as n\n'
+                    'say 1\n', 3)
+        got = sync_diags({main_uri})
+        diags = got[main_uri]
+        assert len(diags) == 1, f'expected 1 diagnostic, got {diags}'
+        assert diags[0]['range']['start']['line'] == 0, diags[0]
+        assert 'cannot find module' in diags[0]['message'], diags[0]
+
+        # (e): a genuine type error in the entry file still surfaces
+        change_main('import "lib/math.niko" as m\n'
+                    'set x: number to "oops"\n', 4)
+        got = sync_diags({main_uri})
+        diags = got[main_uri]
+        assert len(diags) == 1, f'expected 1 diagnostic, got {diags}'
+        assert diags[0]['range']['start']['line'] == 1, diags[0]
+        assert 'cannot assign' in diags[0]['message'], diags[0]
+
+        # (f): an error inside a module file is attributed to that
+        # file's URI and line
+        change_main('import "lib/broken.niko" as b\n'
+                    'say 1\n', 5)
+        got = sync_diags({main_uri, broken_uri})
+        assert got[main_uri] == [], \
+            f'expected no entry diagnostics, got {got[main_uri]}'
+        bdiags = got[broken_uri]
+        assert len(bdiags) == 1, \
+            f'expected 1 module diagnostic, got {bdiags}'
+        assert bdiags[0]['range']['start']['line'] == 0, bdiags[0]
+        assert 'cannot assign' in bdiags[0]['message'], bdiags[0]
+
+        # (g): unsaved edits to the module file are honored -- didOpen
+        # the fixed text (the disk copy is still broken), which clears
+        # the module diagnostic through the module file's own analysis
+        client4.notify('textDocument/didOpen', {'textDocument': {
+            'uri': broken_uri, 'languageId': 'niko', 'version': 1,
+            'text': 'set x: number to 1\n'}})
+        got = sync_diags({broken_uri})
+        assert got[broken_uri] == [], \
+            f'expected cleared module diagnostics, got {got[broken_uri]}'
+
+        # (h): touching the entry re-runs the entry's analysis, which
+        # must use the in-memory override for the module file -- no
+        # stale diagnostic from the on-disk copy may be published. A
+        # second no-op change proves it: any stale publish from the
+        # first change would surface ahead of the entry's message.
+        change_main('import "lib/broken.niko" as b\n'
+                    'say 2\n', 6)
+        got = sync_diags({main_uri})
+        assert got[main_uri] == [], \
+            f'expected no entry diagnostics, got {got[main_uri]}'
+        change_main('import "lib/broken.niko" as b\n'
+                    'say 2\n', 7)
+        got = sync_diags({main_uri})
+        assert broken_uri not in got, \
+            f'stale module publish without override: {got[broken_uri]}'
+
+        client4.request('shutdown', {})
+        print('test_lsp.py (Alpha 23): module-aware diagnostics assertions passed')
+    finally:
+        client4.close()
+finally:
+    shutil.rmtree(fixture23, ignore_errors=True)

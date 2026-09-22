@@ -222,6 +222,37 @@ _expect_error(
     entry_src='import "imp.niko" as m\nsay m.x\n')
 
 
+_expect_error(
+    'use-inside-function',
+    {},
+    'main.niko',
+    ["'use' is only allowed at the top of a file, not inside a function",
+     'line 2', 'use "helper.niko"'],
+    entry_src='to f:\n    use "helper.niko"\n    say 1\nf()\n')
+
+
+def test_use_inside_function_checker():
+    # Checker-level: `use` inside a function body is rejected with the
+    # right line number, mirroring `import`'s existing
+    # 'import must be at the top of the file' rule. A top-level `use`
+    # still checks clean.
+    from niko2.parser import parse
+    from niko2.typecheck import check, TypeErrorNiko
+    tree = parse('to f:\n    use "x.niko"\n    say 1\n')
+    try:
+        check(tree, [])
+    except TypeErrorNiko as e:
+        assert e.line == 2, e.line
+        assert "'use' is only allowed at the top of a file" in str(e), str(e)
+    else:
+        raise AssertionError('expected TypeErrorNiko for use inside a function')
+    check(parse('use "x.niko"\nsay 1\n'), [])
+    _ok('use-inside-function-checker')
+
+
+test_use_inside_function_checker()
+
+
 def test_type_error_attribution():
     # A checker error inside a used file names the used file and its
     # own line, with a caret -- not the entry file.
