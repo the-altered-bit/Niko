@@ -217,10 +217,14 @@ generated code). Same value model as WASM (boxed values, f64 numbers).
 
 ## Alpha 13 modules limits
 
-- **The language server is single-file.** `niko2 lsp` / `niko2 check`
-  analyze one file at a time, so go-to-definition and hover don't follow
-  `import` across files (`import` aliases check as `map` so nothing
-  breaks).
+- **The language server follows `import` for go-to-definition (Alpha 17) but
+  is otherwise single-file.** `niko2 lsp` jumps from `alias.name` to the
+  top-level `set`/`to` in the module file, and from an import's path
+  string to the module file itself — resolved through the same search
+  path as the compiler (file dir → `NIKO_PATH` → bundled stdlib → cwd →
+  package cache). Hover and diagnostics still analyze one file at a time
+  (hover doesn't follow imports; `import` aliases check as `map` so
+  nothing breaks).
 - **Module search path exists; the package manager shipped in Alpha 16.**
   `import` resolves: importing file's dir → `NIKO_PATH` dirs → bundled
   stdlib (`stdlib/…` paths) → cwd; a local/`NIKO_PATH` `stdlib/` tree

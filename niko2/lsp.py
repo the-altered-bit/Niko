@@ -8,22 +8,34 @@ Protocol for a good editing experience in any LSP-capable editor:
 - `textDocument/completion` — keywords, builtins, and names defined in
   the file
 - `textDocument/hover` — builtin docs and inferred types of your names
-- `textDocument/definition` — jump to where a name was defined
+- `textDocument/definition` — jump to where a name was defined, following
+  `import` across files (Alpha 17: `alias.name` jumps to the top-level
+  `set`/`to` in the module file; the import's path string jumps to the
+  module file itself)
 - `textDocument/formatting` — runs `niko2 format` on the whole document
 
 Hover and go-to-definition are line-oriented: Niko 2 AST nodes carry line
 numbers but not columns, so results resolve to the nearest sensible line
-(see `niko2/symbols.py`).
+(see `niko2/symbols.py`). Cross-file definition reuses
+`niko2/modules.py`'s import resolution, so `pkg:` imports, relative
+`./` imports inside packages, NIKO_PATH, and the bundled stdlib all work
+exactly as they do at compile time; an import that can't be resolved
+simply yields no definition (never an error).
 """
 import re
 import sys
 import traceback
+from pathlib import Path
+from urllib.parse import urlparse, unquote
+from urllib.request import url2pathname
 
 from .jsonrpc import read_message, write_message
 from .parser import parse, ParseError
 from .typecheck import check, TypeErrorNiko, BUILTIN_NAMES
 from .formatter import format_program
 from .symbols import collect_symbols, find_symbol, all_names
+from .ast import Node, ImportStmt, AttrExpr, NameExpr, SetStmt, FunctionDef
+from .modules import resolve_import, ImportErrorNiko
 
 VERSION = '2.0.0-alpha.7'
 
@@ -87,6 +99,81 @@ def _word_at(line_text, character):
     return None
 
 
+def _uri_to_path(uri):
+    """Filesystem path for a `file:` URI, or None for anything else."""
+    try:
+        parts = urlparse(uri)
+    except Exception:
+        return None
+    if parts.scheme != 'file':
+        return None
+    path = url2pathname(unquote(parts.path))
+    return path or None
+
+
+def _path_to_uri(path):
+    return Path(path).as_uri()
+
+
+def _loc(uri, line0):
+    return {'uri': uri, 'range': {
+        'start': {'line': line0, 'character': 0},
+        'end': {'line': line0, 'character': 0}}}
+
+
+def _iter_nodes(root):
+    """Yield every AST node under `root` (generic dataclass walk)."""
+    seen = set()
+
+    def visit(x):
+        if isinstance(x, Node):
+            if id(x) in seen:
+                return
+            seen.add(id(x))
+            yield x
+            for fname in getattr(x, '__dataclass_fields__', {}):
+                yield from visit(getattr(x, fname, None))
+        elif isinstance(x, (list, tuple)):
+            for item in x:
+                yield from visit(item)
+
+    yield from visit(root)
+
+
+def _resolve_import_target(importer, raw_path, line):
+    """Absolute Path of the module an import string points at, or None.
+
+    Reuses `modules.resolve_import`, so the LSP resolves exactly what the
+    compiler resolves (`pkg:` via niko.lock + the package cache, relative
+    `./` paths, NIKO_PATH, the bundled stdlib, cwd). Unresolvable imports
+    yield None -- the definition request then reports "no definition"
+    instead of failing.
+    """
+    try:
+        return resolve_import(raw_path, str(Path(importer).parent),
+                              line, importer)
+    except ImportErrorNiko:
+        return None
+
+
+def _module_def_line(target, name):
+    """0-based line of the top-level `set`/`to` defining `name` in the
+    module file; 0 when the module can't be read/parsed or doesn't define
+    it (jumping to the file itself is still the right answer)."""
+    try:
+        src = Path(target).read_text(encoding='utf8')
+    except OSError:
+        return 0
+    try:
+        tree = parse(src)
+    except ParseError:
+        return 0
+    for n in tree.body:
+        if isinstance(n, (SetStmt, FunctionDef)) and n.name == name:
+            return n.line - 1
+    return 0
+
+
 def _diagnostic(exc):
     line = max(1, getattr(exc, 'line', 1) or 1)
     col = getattr(exc, 'col', None) or 1
@@ -135,11 +222,15 @@ class Server:
             'params': {'uri': uri, 'diagnostics': diags},
         })
 
-    def _symbols(self, uri):
+    def _tree(self, uri):
         tree = self.trees.get(uri)
         if tree is None:
-            diags, tree = _analyze(self.docs.get(uri, ''))
+            _diags, tree = _analyze(self.docs.get(uri, ''))
             self.trees[uri] = tree
+        return tree
+
+    def _symbols(self, uri):
+        tree = self._tree(uri)
         if tree is None:
             return None
         return collect_symbols(tree)
@@ -244,16 +335,61 @@ class Server:
         word = _word_at(lines[pos['line']], pos['character'])
         if not word:
             return None
+        tree = self._tree(uri)
+        if tree is not None:
+            loc = self._definition_import(uri, tree, lines[pos['line']],
+                                          pos['line'] + 1,
+                                          pos['character'], word)
+            if loc is not None:
+                return loc
         root = self._symbols(uri)
         if root is None:
             return None
         sym = find_symbol(root, word, pos['line'] + 1)
         if sym is None or sym.kind == 'builtin':
             return None
-        ln = sym.line - 1
-        return {'uri': uri, 'range': {
-            'start': {'line': ln, 'character': 0},
-            'end': {'line': ln, 'character': 0}}}
+        return _loc(uri, sym.line - 1)
+
+    def _definition_import(self, uri, tree, line_text, line1, char, word):
+        """Cross-file go-to-definition through `import` (Alpha 17).
+
+        - Cursor on the quoted path of `import "path.niko" as alias`:
+          jump to the module file itself.
+        - Cursor on `name` in `alias.name` where `alias` is an import
+          alias: jump to the top-level `set`/`to` defining `name` in the
+          module file.
+        Returns None when the cursor isn't on either, or when the import
+        can't be resolved (missing file, bad `pkg:` spec): the request
+        then reports "no definition", never an error.
+        """
+        importer = _uri_to_path(uri)
+        if importer is None:
+            return None
+        imports = {}  # alias -> raw path string
+        for n in _iter_nodes(tree):
+            if isinstance(n, ImportStmt):
+                imports[n.alias] = n.path
+                if n.line == line1:
+                    for quote in ('"', "'"):
+                        q = f'{quote}{n.path}{quote}'
+                        i = line_text.find(q)
+                        if i != -1 and i <= char < i + len(q):
+                            target = _resolve_import_target(
+                                importer, n.path, n.line)
+                            if target is None:
+                                return None
+                            return _loc(_path_to_uri(target), 0)
+        for n in _iter_nodes(tree):
+            if (isinstance(n, AttrExpr) and n.line == line1
+                    and isinstance(n.obj, NameExpr)
+                    and n.obj.name in imports and n.name == word):
+                target = _resolve_import_target(
+                    importer, imports[n.obj.name], n.line)
+                if target is None:
+                    return None
+                return _loc(_path_to_uri(target),
+                            _module_def_line(target, word))
+        return None
 
     def _format(self, params):
         uri = params['textDocument']['uri']

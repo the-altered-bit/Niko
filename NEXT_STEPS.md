@@ -112,9 +112,7 @@ match cases in `tests/test_formatter.py`.
   (`obj.method(...)` via the first-class callee path), and
   `import`/`as` were added to LSP keywords + the VS Code grammar.
   Tests: `tests/test_modules.py` (7 programs 3-way differential +
-  7 error cases). Future work: LSP go-to-definition across files.
-  See `RELEASE_NOTES_ALPHA13.md` and
-  `ALPHA13_DESIGN.md`.
+  7 error cases). See `RELEASE_NOTES_ALPHA13.md` and `ALPHA13_DESIGN.md`.
 - **Alpha 14 is complete**: Niko 2 standard library (pure-Niko `text`,
   `math`, `lists`, `records` under `niko2/stdlib/`, `import
   "stdlib/text.niko" as text`, byte-identical on VM/WASM/native) +
@@ -155,6 +153,23 @@ match cases in `tests/test_formatter.py`.
   unambiguous with Niko 1's `niko.py`). Worked example in
   `examples/packages/` (+`README.txt`). Tests: `tests/test_packages.py`;
   full suite green. See `RELEASE_NOTES_ALPHA16.md`, `ALPHA16_DESIGN.md`.
+- **Alpha 17 is complete**: cross-file LSP go-to-definition.
+  `textDocument/definition` on `name` in `alias.name` (where `alias` is
+  an `import` alias) jumps to the top-level `set`/`to` defining `name` in
+  the module file; on the import's quoted path string it opens the module
+  file itself. Reuses `niko2/modules.py`'s `resolve_import`, so the editor
+  resolves exactly what the compiler resolves — importing file's dir →
+  `NIKO_PATH` → bundled stdlib (`stdlib/…`) → cwd → package cache (`pkg:`
+  via `niko.lock` pin, else newest cached) — including relative `./`
+  imports inside cached packages. Unresolvable imports yield the LSP
+  `null` result, never an error. Cursor on the alias itself still jumps to
+  the `import` line. Limits: line-level (not column) targets, hover
+  doesn't follow imports yet, one hop only. Tests: extended
+  `tests/test_lsp.py` (real LSP sessions over a multi-file fixture:
+  `m.add`/`m.tau` land at the right lines, the import string opens the
+  module file, `pkg:` via a lockfile pin, `./` import inside the package,
+  missing-module graceful null, alias pin). Full suite green. See
+  `RELEASE_NOTES_ALPHA17.md`.
 
 ## Standing cautions
 

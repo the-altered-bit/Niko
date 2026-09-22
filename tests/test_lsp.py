@@ -152,3 +152,119 @@ try:
     print('test_lsp.py: all assertions passed')
 finally:
     client.close()
+
+
+# --- Alpha 17: cross-file go-to-definition ---------------------------------
+import shutil
+import tempfile
+
+fixture = tempfile.mkdtemp(prefix='niko-lsp-xfile-')
+try:
+    proj = pathlib.Path(fixture) / 'proj'
+    (proj / 'lib').mkdir(parents=True)
+    (proj / 'lib' / 'math.niko').write_text(
+        'to add with a, b:\n    give back a + b\n\nset tau to 6.28\n',
+        encoding='utf8')
+    main_src = (
+        'import "lib/math.niko" as m\n'
+        'import "pkg:hello/main.niko" as h\n'
+        'import "missing.niko" as n\n'
+        '\n'
+        'say m.add(1, 2)\n'
+        'say m.tau\n'
+        'say h.greet("Casper")\n'
+        'say n.anything\n'
+    )
+    (proj / 'main.niko').write_text(main_src, encoding='utf8')
+    pkg = pathlib.Path(fixture) / 'pkgcache' / 'hello-1.0.0'
+    pkg.mkdir(parents=True)
+    (pkg / 'main.niko').write_text(
+        'import "./util.niko" as u\n\nto greet with who:\n    give back u.shout(who)\n',
+        encoding='utf8')
+    (pkg / 'util.niko').write_text(
+        'to shout with t:\n    give back upper(t)\n', encoding='utf8')
+    (proj / 'niko.lock').write_text(
+        json.dumps({'packages': {'hello': {'version': '1.0.0',
+                                           'source': 'test-fixture'}}}),
+        encoding='utf8')
+
+    old_cache = os.environ.get('NIKO_PKG_CACHE')
+    os.environ['NIKO_PKG_CACHE'] = str(pathlib.Path(fixture) / 'pkgcache')
+    client2 = Client()
+    try:
+        caps = client2.request('initialize', {'processId': None, 'rootUri': None, 'capabilities': {}})
+        assert caps['capabilities']['definitionProvider'] is True
+        client2.notify('initialized', {})
+
+        main_uri = (proj / 'main.niko').as_uri()
+        math_uri = (proj / 'lib' / 'math.niko').as_uri()
+        hello_uri = (pkg / 'main.niko').as_uri()
+        util_uri = (pkg / 'util.niko').as_uri()
+        client2.notify('textDocument/didOpen', {'textDocument': {
+            'uri': main_uri, 'languageId': 'niko', 'version': 1,
+            'text': main_src}})
+        # pull messages until we see publishDiagnostics (an unresolvable
+        # import still types as map, so expect zero diagnostics)
+        diags = None
+        for _ in range(20):
+            msg = client2._read()
+            if msg.get('method') == 'textDocument/publishDiagnostics':
+                diags = msg['params']['diagnostics']
+                break
+            client2.notifications.append(msg)
+        assert diags == [], f'expected no diagnostics, got {diags}'
+
+        def goto(uri, line, char):
+            return client2.request('textDocument/definition', {
+                'textDocument': {'uri': uri},
+                'position': {'line': line, 'character': char}})
+
+        # the import string itself -> the module file
+        loc = goto(main_uri, 0, 10)
+        assert loc is not None and loc['uri'] == math_uri \
+            and loc['range']['start']['line'] == 0, loc
+
+        # m.add -> `to add` in the module file (0-based line 0)
+        loc = goto(main_uri, 4, 7)
+        assert loc is not None and loc['uri'] == math_uri \
+            and loc['range']['start']['line'] == 0, loc
+
+        # m.tau -> `set tau` in the module file (0-based line 3)
+        loc = goto(main_uri, 5, 7)
+        assert loc is not None and loc['uri'] == math_uri \
+            and loc['range']['start']['line'] == 3, loc
+
+        # cursor on the alias itself -> the import line (single-file)
+        loc = goto(main_uri, 4, 4)
+        assert loc is not None and loc['uri'] == main_uri \
+            and loc['range']['start']['line'] == 0, loc
+
+        # pkg: import (lockfile pin) -> the cached package file
+        loc = goto(main_uri, 6, 7)
+        assert loc is not None and loc['uri'] == hello_uri \
+            and loc['range']['start']['line'] == 2, loc
+
+        # relative ./ import inside the package -> the sibling file
+        client2.notify('textDocument/didOpen', {'textDocument': {
+            'uri': hello_uri, 'languageId': 'niko', 'version': 1,
+            'text': (pkg / 'main.niko').read_text(encoding='utf8')}})
+        loc = goto(hello_uri, 3, 18)
+        assert loc is not None and loc['uri'] == util_uri \
+            and loc['range']['start']['line'] == 0, loc
+
+        # missing module: no crash, null result
+        loc = goto(main_uri, 2, 10)
+        assert loc is None, loc
+        loc = goto(main_uri, 7, 6)
+        assert loc is None, loc
+
+        client2.request('shutdown', {})
+        print('test_lsp.py (Alpha 17): cross-file definition assertions passed')
+    finally:
+        client2.close()
+        if old_cache is None:
+            os.environ.pop('NIKO_PKG_CACHE', None)
+        else:
+            os.environ['NIKO_PKG_CACHE'] = old_cache
+finally:
+    shutil.rmtree(fixture, ignore_errors=True)
