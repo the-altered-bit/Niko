@@ -170,6 +170,30 @@ match cases in `tests/test_formatter.py`.
   module file, `pkg:` via a lockfile pin, `./` import inside the package,
   missing-module graceful null, alias pin). Full suite green. See
   `RELEASE_NOTES_ALPHA17.md`.
+- **Alpha 20 is complete**: interactive REPL — `niko2 repl` (new
+  `niko2/repl.py`: `ReplSession` + `main()`; `niko2/cli.py` gains the
+  `repl` command). Prompts `niko> ` / `.... `; a line ending in `:`
+  opens a block (quote-parity heuristic for colons in strings), blank
+  line or dedented line ends it, `otherwise:`/`when ` continue the
+  enclosing `if`/`match`, indent stack handles nesting. Persistence:
+  accepted chunks accumulate in `src_parts` (bare expressions stored as
+  synthetic `set __repl_echo_N to (<expr>)`); each chunk re-parses +
+  re-typechecks the whole accumulated source (plain `check()`, or the
+  module pipeline against a fake `<repl>` entry when imports are used)
+  and only the delta is compiled + run on one session VM. Imports
+  initialize once per session (module top-level `say` prints once across
+  chunks incl. re-imports); relative imports resolve against cwd;
+  `use "…"` via `VMLoader`. Echo: bare expressions print `fmt(value)`,
+  `nothing` never echoes. Implementation bug found & fixed: cumulative
+  function table merged into each compiled module before `run_module`
+  (VM untouched) so earlier chunks' nested functions stay resolvable.
+  Robustness: caret diagnostics (cumulative session line numbers),
+  Ctrl-C re-prompts, Ctrl-D exits 0 (open block at EOF submitted first),
+  `:help`/`:quit`/`:exit`/`:reset`, unknown `:foo` gets a hint. Limits:
+  VM only, no single-chunk undo, spaces for indent. Tests: new
+  `tests/test_repl.py` (20 checks, scripted stdin into real `niko2 repl`
+  subprocesses, hermetic). Full suite green. See
+  `RELEASE_NOTES_ALPHA20.md` / `ALPHA20_DESIGN.md`.
 - **Alpha 19 is complete**: package registry + version-range solving.
   `niko2/semver.py` (range grammar: `*`, exact, partials, npm-style
   `^`/`~`, comparators, comma AND; `max_satisfying` solver,

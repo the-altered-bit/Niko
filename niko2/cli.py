@@ -97,7 +97,7 @@ def run(src,name='<memory>'):
 
 def main():
     ap=argparse.ArgumentParser(prog='niko2',description='Niko 2 compiler/interpreter')
-    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','deps','lock','get','publish','lsp','debug','wasm','native'])
+    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','deps','lock','get','publish','lsp','debug','wasm','native','repl'])
     ap.add_argument('file',nargs='?')
     ap.add_argument('--force',action='store_true',help='(get/publish) reinstall the package even if it is already cached/published')
     ap.add_argument('--update',action='store_true',help='(get) re-resolve a registry package to the newest matching version and upgrade the install + lockfile pin')
@@ -122,6 +122,8 @@ def main():
         from .lsp import main as lsp_main; return lsp_main()
     if a.command=='debug':
         from .dap import main as dap_main; return dap_main()
+    if a.command=='repl':
+        from .repl import main as repl_main; return repl_main()
     if a.command=='init':
         target=a.file or '.'
         root=init_project(target); print(f'✓ initialized Niko project: {root}'); return 0

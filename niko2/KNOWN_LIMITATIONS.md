@@ -276,3 +276,24 @@ generated code). Same value model as WASM (boxed values, f64 numbers).
   `niko2 get --force <src>` is rejected (pre-existing argparse quirk).
   Exception: `niko2 get --update <name>` is special-cased via an argv
   pre-scan, so both flag positions work for `--update`.
+
+## Alpha 20 REPL limits
+
+- **VM backend only.** The REPL (`niko2 repl`) runs on the VM. The WASM
+  and native backends are compile targets, not REPL targets.
+- **Diagnostics show cumulative session line numbers**, not per-chunk
+  ones — a caret points at the line you typed, counted from the start
+  of the session.
+- **The block-open colon is a heuristic.** A stripped line ending in
+  `:` opens a block unless the colon is inside a string literal, and
+  "inside a string" is decided by quote parity with escapes honoured,
+  not full string parsing.
+- **Multi-line constructs need increasing indentation; spaces expected.**
+  The REPL cannot know a block is closed except by a blank line or a
+  dedent, so tabs or flat multi-line pastes may misbehave.
+- **No single-chunk undo.** A chunk that parsed and typechecked joins
+  the history even if it failed at runtime (script-that-crashed
+  semantics); `:reset` is the only way to forget.
+- **Redefining a function replaces its nested helpers session-wide.**
+  A reference to the old function saved in an earlier chunk resolves
+  nested names to the newest definitions.

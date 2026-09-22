@@ -63,3 +63,35 @@ python -m niko2 init myapp
 python -m niko2 info examples/hello_v2.niko
 python -m niko2 run examples/hello_v2.niko
 ```
+
+## Niko 2 Alpha 20 — interactive REPL
+
+`niko2 repl` starts a live session on the VM: type Niko 2 code line by
+line, define functions across multiple lines, import modules, and see
+bare expressions echoed back — with the same caret diagnostics as
+scripts.
+
+```bash
+python -m niko2 repl
+```
+
+```console
+niko> set x to 5
+niko> say x + 1
+6
+niko> to add with a, b:
+....     give back a + b
+....
+niko> say add(2, 3)
+5
+niko> 1 + 2
+3
+```
+
+A line ending in `:` opens a block (`.... ` prompt); finish it with a
+blank line or a dedented line. A bare expression is evaluated and its
+value printed (`nothing` is never echoed). `import "path/to/file.niko"
+as alias` works as in scripts — relative paths resolve against the
+directory where you started the REPL, and each module initializes once
+per session. Commands: `:help`, `:quit` / `:exit`, `:reset` (forgets
+everything). Ctrl-D leaves; Ctrl-C discards the current block.
