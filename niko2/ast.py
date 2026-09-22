@@ -19,6 +19,8 @@ class AskStmt(Node): name:str; prompt:object; want_number:bool
 @dataclass
 class SayStmt(Node): exprs:list
 @dataclass
+class AssertStmt(Node): cond:object; message:object|None; source:str
+@dataclass
 class ExprStmt(Node): expr:object
 @dataclass
 class IfStmt(Node): branches:list; otherwise:list|None=None

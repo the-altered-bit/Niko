@@ -166,6 +166,16 @@ def parse_stmt(lines,i,ind):
         mv=_match_value_at(lines,i,ind,rest,line_no)
         if mv is not None: mexpr,j=mv; return SayStmt(line_no,[mexpr]),j
         return SayStmt(line_no, [] if not rest else [parse_expr(x,line_no) for x in split_top(rest)]),i+1
+    if text.startswith('assert') and (len(text)==6 or text[6].isspace()):
+        rest=text[6:].strip()
+        if not rest: raise ParseError('expected assert EXPR [, MESSAGE]', line_no, col=_kw_col(lines,i,ind,'assert '))
+        parts=split_top(rest)
+        if len(parts)>2: raise ParseError('expected assert EXPR or assert EXPR, MESSAGE', line_no)
+        cond_src=parts[0].strip()
+        if not cond_src: raise ParseError('expected assert EXPR [, MESSAGE]', line_no)
+        msg_src=parts[1].strip() if len(parts)==2 else ''
+        if len(parts)==2 and not msg_src: raise ParseError('expected assert EXPR, MESSAGE', line_no)
+        return AssertStmt(line_no,parse_expr(cond_src,line_no),parse_expr(msg_src,line_no) if msg_src else None,cond_src),i+1
     if text=='stop': return StopStmt(line_no),i+1
     if text=='skip': return SkipStmt(line_no),i+1
     if text.startswith('give back'):

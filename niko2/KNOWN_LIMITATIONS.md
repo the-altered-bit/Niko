@@ -347,3 +347,22 @@ What remains:
 - **Redefining a function replaces its nested helpers session-wide.**
   A reference to the old function saved in an earlier chunk resolves
   nested names to the newest definitions.
+
+## Alpha 27 test runner limits
+
+- **VM backend only.** `niko2 test` runs on the VM — it is a dev tool
+  and the VM is the reference semantics. WASM/native are compile
+  targets; per-test toolchain spin-up would be slow and cannot easily
+  invoke individual test functions.
+- **`assert` is not supported on the native backend.** Compiling a
+  program containing `assert` with `niko2 native` is a clean compile
+  error (`assert is not supported on the native backend`), never a
+  miscompile. VM and WASM implement it with identical messages.
+- **No fixtures, mocks, or coverage.** The runner discovers, isolates,
+  and reports — nothing more. These are future work, not half-built
+  flags.
+- **Only `to test_<name>:` is collected.** `to test <name>:` (space
+  form) parses as a function literally named `'test <name>'`, which no
+  call syntax can invoke — it is dead code and the runner ignores it.
+- **`say` output prints straight through** during tests; there is no
+  output-capture assertion API.

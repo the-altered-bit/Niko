@@ -39,6 +39,17 @@ class Compiler:
         elif isinstance(n,SayStmt):
             for x in n.exprs: self.expr(x,b)
             b.emit('SAY',len(n.exprs),n.line)
+        elif isinstance(n,AssertStmt):
+            # The message is evaluated lazily: only when the condition fails,
+            # like Python's assert. ASSERT pops the message and raises.
+            self.expr(n.cond,b)
+            jf=b.emit('JUMP_IF_FALSE',None,n.line)
+            over=b.emit('JUMP',None,n.line)
+            b.patch(jf,len(b.code))
+            if n.message is not None: self.expr(n.message,b)
+            else: b.emit('PUSH_CONST',b.const('',n.line),n.line)
+            b.emit('ASSERT',n.source,n.line)
+            b.patch(over,len(b.code))
         elif isinstance(n,ExprStmt): self.expr(n.expr,b); b.emit('POP',line=n.line)
         elif isinstance(n,ReturnStmt):
             if n.expr is None: b.emit('PUSH_CONST',b.const(None,n.line),n.line)

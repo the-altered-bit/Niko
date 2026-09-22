@@ -97,7 +97,7 @@ def run(src,name='<memory>'):
 
 def main():
     ap=argparse.ArgumentParser(prog='niko2',description='Niko 2 compiler/interpreter')
-    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','deps','lock','get','publish','lsp','debug','wasm','native','repl'])
+    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','deps','lock','get','publish','lsp','debug','wasm','native','repl','test'])
     ap.add_argument('file',nargs='?')
     ap.add_argument('--force',action='store_true',help='(get/publish) reinstall the package even if it is already cached/published')
     ap.add_argument('--update',action='store_true',help='(get) re-resolve a registry package to the newest matching version and upgrade the install + lockfile pin')
@@ -124,6 +124,9 @@ def main():
         from .dap import main as dap_main; return dap_main()
     if a.command=='repl':
         from .repl import main as repl_main; return repl_main()
+    # Alpha 27: minimal test runner -- `niko2 test [dir]`.
+    if a.command=='test':
+        from .test_runner import main as test_main; return test_main(a.file)
     if a.command=='init':
         target=a.file or '.'
         root=init_project(target); print(f'✓ initialized Niko project: {root}'); return 0
@@ -249,7 +252,7 @@ def main():
         print(f'✓ published {info["name"]} {info["version"]} to {info["spec"]}')
         return 0
     if not a.file:
-        print('Usage: niko2 run <file.niko|.nikoir> | niko2 check <file.niko> | niko2 format <file.niko> | niko2 deps [folder] | niko2 lock [folder] | niko2 get <package-directory|git-url> [--force] | niko2 get <name>[@<range>] [--force] | niko2 get --update <name> | niko2 publish [--registry <dir>] [--force] | niko2 init <folder> | niko2 lsp | niko2 debug | niko2 wasm <file.niko> [-o out.wasm] [--run] | niko2 native <file.niko> [-o out] [--run] [--emit-c]'); return 2
+        print('Usage: niko2 run <file.niko|.nikoir> | niko2 check <file.niko> | niko2 format <file.niko> | niko2 deps [folder] | niko2 lock [folder] | niko2 get <package-directory|git-url> [--force] | niko2 get <name>[@<range>] [--force] | niko2 get --update <name> | niko2 publish [--registry <dir>] [--force] | niko2 init <folder> | niko2 lsp | niko2 debug | niko2 wasm <file.niko> [-o out.wasm] [--run] | niko2 native <file.niko> [-o out] [--run] [--emit-c] | niko2 test [dir]'); return 2
 
     # Alpha 8: compile to WebAssembly.
     if a.command=='wasm':

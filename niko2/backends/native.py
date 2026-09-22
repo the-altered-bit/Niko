@@ -22,7 +22,7 @@ from pathlib import Path
 
 from ..ast import (
     Node, Program, SetStmt, IndexSetStmt, AugAssignStmt, PutStmt, RemoveStmt,
-    AskStmt, SayStmt, ExprStmt, IfStmt, RepeatStmt, ForStmt, WhileStmt,
+    AskStmt, SayStmt, AssertStmt, ExprStmt, IfStmt, RepeatStmt, ForStmt, WhileStmt,
     StopStmt, SkipStmt, FunctionDef, ReturnStmt, UseStmt, MatchStmt, MatchExpr,
     MatchLit, MatchBind, MatchOk, MatchErr, MatchList, MatchRest, MatchRecord,
     CallExpr, NameExpr, LiteralExpr, ListExpr, RecordExpr, IndexExpr,
@@ -509,6 +509,12 @@ class NikoCCompiler:
                 self._emit(f'niko_say({len(parts)}, {t});')
             else:
                 self._emit(f'niko_say(0, (NVal**)0);')
+        elif isinstance(n, AssertStmt):
+            # Alpha 27: `assert` is not supported on the native backend yet.
+            # The two-arg form needs a runtime text value concatenated into
+            # the panic message, and the C runtime has no text-concat helper
+            # for that; fail loudly instead of miscompiling.
+            raise CompileError("assert is not supported on the native backend", line=n.line)
         elif isinstance(n, ExprStmt):
             self._emit(f'(void){self.gen_expr(n.expr)};')
         elif isinstance(n, IfStmt):

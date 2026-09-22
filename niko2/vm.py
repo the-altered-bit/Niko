@@ -146,6 +146,11 @@ class VM:
                 elif op=='POP': f.stack.pop()
                 elif op=='SAY':
                     vals=[f.stack.pop() for _ in range(a)][::-1]; print(' '.join(fmt(x) for x in vals))
+                elif op=='ASSERT':
+                    msg=f.stack.pop()
+                    body=f'Assertion failed: "{a}" is not true.'
+                    if msg: body=f'Assertion failed: "{a}" is not true: {msg}'
+                    raise NikoRuntimeError(f'Line {ins.line}: {body}')
                 elif op=='BUILD_LIST': f.stack.append([f.stack.pop() for _ in range(a)][::-1])
                 elif op=='BUILD_RECORD':
                     vals=[f.stack.pop() for _ in range(a*2)][::-1]; f.stack.append({vals[i]:vals[i+1] for i in range(0,len(vals),2)})

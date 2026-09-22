@@ -142,3 +142,41 @@ python -m niko2 lock .           # pins greetapp AND its transitive deps
 
 See `examples/registry-http/` for a worked publish → serve → get → lock →
 run demo, and `RELEASE_NOTES_ALPHA24.md` / `ALPHA24_DESIGN.md` for details.
+
+## Niko 2 Alpha 27 — test runner + `assert`
+
+`niko2 test` discovers and runs tests in Niko code itself: `niko2 test
+[dir]` recursively finds `*_test.niko` and `test_*.niko` (no config
+file). Every top-level `to test_<name>:` with no parameters is a test,
+run in total isolation — a fresh VM per test, so one test's globals
+can't leak into another. `import`/`use` of the code under test work
+exactly like `niko2 run`. A test fails on a raised Niko error or a
+failed `assert`; a file that doesn't compile is a reported failure,
+never a crash. Output is plain and greppable, with `N passed, M
+failed` and exit code 0 iff all pass.
+
+```bash
+python -m niko2 test examples/testing
+```
+
+```console
+PASS test_add (math_test.niko)
+PASS test_mul (math_test.niko)
+PASS test_add_zero (math_test.niko)
+3 passed, 0 failed
+```
+
+The new `assert` statement is the idiomatic way to fail a test:
+
+```niko
+to test_add:
+  assert math.add(20, 22) == 42
+  assert math.add(0, 5) == 5, "adding zero should not change the number"
+```
+
+The condition must be boolean (the message, if given, must be text —
+both typechecked); on failure the error names the expression's source
+text and the line: `Line 4: Assertion failed: "math.add(0, 5) == 5" is
+not true.` The runner is VM-only; `assert` also works on the WASM
+backend (the native backend refuses it with a clean compile error).
+No fixtures, mocks, or coverage yet — see `RELEASE_NOTES_ALPHA27.md`.

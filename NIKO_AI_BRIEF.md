@@ -58,6 +58,7 @@ stop                                 leave the loop
 skip                                 next round
 to NAME with A, B:   /   to NAME:    define a function (call it as NAME(x, y) or NAME())
 give back VALUE                      return
+assert EXPR  /  assert EXPR, "message"   fail with a Niko error naming the expression and line (message optional, text)
 match VALUE:  /  when PATTERN:  /  otherwise:     (Niko 2 only) pick a branch by shape — see 3b
 use MODULE                           import a Python library (desktop only)
 ANYTHING ELSE                        an expression, e.g. a function call: greet("Sam")

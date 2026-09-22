@@ -323,6 +323,22 @@ match cases in `tests/test_formatter.py`.
   checks (`tests/test_repl.py`, 30/30 green); mtime-cache + `pkg:`
   sections in `tests/test_lsp.py`. Full suite green. See
   `RELEASE_NOTES_ALPHA26.md` / `ALPHA26_DESIGN.md`.
+- **Alpha 27 is complete**: `niko2 test` test runner + `assert`
+  statement. `assert <expr>` / `assert <expr>, "message"` — boolean
+  condition + text message, typechecked; failure raises a Niko error
+  naming the expression source and line (`Line 5: Assertion failed:
+  "2 * 2 == 5" is not true: maths broke`), message evaluated lazily.
+  VM + WASM (identical messages); native refuses with a clean compile
+  error. `niko2 test [dir]` discovers `*_test.niko` / `test_*.niko`
+  recursively (no config); tests are top-level `to test_<name>:` with
+  no params; each test compiles `file + "\ntest_name()"` through the
+  module pipeline and runs on a fresh VM (total isolation;
+  `import`/`use` work like `niko2 run`). Plain greppable
+  `PASS`/`FAIL` lines, `N passed, M failed`, exit 0 iff all pass.
+  Deliberate limits: no fixtures/mocks/coverage; VM-only runner.
+  Tests: `tests/test_assert.py`, `tests/test_test_runner.py` (22);
+  worked example `examples/testing/`. Full suite green. See
+  `RELEASE_NOTES_ALPHA27.md` / `ALPHA27_DESIGN.md`.
 - **Alpha 19 is complete**: package registry + version-range solving.
   `niko2/semver.py` (range grammar: `*`, exact, partials, npm-style
   `^`/`~`, comparators, comma AND; `max_satisfying` solver,

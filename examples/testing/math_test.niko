@@ -1,0 +1,17 @@
+import "math.niko" as math
+
+# A test is a top-level `to test_<name>:` with no parameters. It fails if
+# it raises a Niko error; `unwrap(error("msg"))` is the way to fail with
+# a message. (Alpha 27 also adds an `assert` statement as shorthand for
+# exactly this pattern -- see README.txt.)
+to test_add:
+  if math.add(20, 22) != 42:
+    unwrap(error("add(20, 22) should be 42"))
+
+to test_mul:
+  if math.mul(6, 7) != 42:
+    unwrap(error("mul(6, 7) should be 42"))
+
+to test_add_zero:
+  if math.add(0, 5) != 5:
+    unwrap(error("adding zero should not change the number"))

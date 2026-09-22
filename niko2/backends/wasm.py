@@ -13,7 +13,7 @@ import struct
 
 from ..ast import (
     Program, SetStmt, IndexSetStmt, AugAssignStmt, PutStmt, RemoveStmt,
-    AskStmt, SayStmt, ExprStmt, IfStmt, RepeatStmt, ForStmt, WhileStmt,
+    AskStmt, SayStmt, AssertStmt, ExprStmt, IfStmt, RepeatStmt, ForStmt, WhileStmt,
     StopStmt, SkipStmt, ReturnStmt, UseStmt, MatchStmt, MatchExpr, FunctionDef,
     CallExpr, NameExpr, LiteralExpr, ListExpr, RecordExpr, IndexExpr,
     UnaryExpr, BinaryExpr, AttrExpr, MatchLit, MatchBind, MatchOk, MatchErr,
@@ -3402,6 +3402,8 @@ class WasmCompiler:
             self._gen_ask(n)
         elif isinstance(n, SayStmt):
             self._gen_say(n)
+        elif isinstance(n, AssertStmt):
+            self._gen_assert(n)
         elif isinstance(n, ExprStmt):
             self._gen_expr(n.expr)
             w.drop()
@@ -3525,6 +3527,35 @@ class WasmCompiler:
         w.local_get(sb); w.i32_load(4)
         w.local_get(sb); w.i32_load(8)
         w.call(self.imp["print"])
+
+    def _gen_assert(self, n):
+        # Alpha 27: assert COND [, MSG]. If the condition is falsy, panic
+        # with "Line <n>: Assertion failed: "<src>" is not true[": <msg>"]".
+        # The message expression is only evaluated on the failure path,
+        # mirroring the VM compiler's lazy codegen.
+        w = self.cur.w
+        end = w.block()
+        self._gen_expr(n.cond)
+        w.call(self.h["truthy"])
+        l = w.if_()
+        w.br(end)
+        w.end()
+        prefix = f'Assertion failed: "{n.source}" is not true'
+        if n.message is None:
+            self.emit_panic_line(w, n.line, prefix + ".")
+        else:
+            t = self.cur.new_local()
+            w.i32_const(self.text_val(prefix + ": "))
+            self._gen_expr(n.message)
+            w.i32_const(self.text_val(""))
+            w.call(self.h["concat3"])
+            w.local_set(t)
+            w.i32_const(n.line)
+            w.local_get(t); w.i32_load(4)
+            w.local_get(t); w.i32_load(8)
+            w.call(self.h["panic_line"])
+            w.unreachable()
+        w.end()
 
     def _gen_for(self, n):
         w = self.cur.w

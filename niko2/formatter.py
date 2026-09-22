@@ -76,6 +76,11 @@ def format_stmt(node, indent=0):
             return format_match_expr(node.exprs[0], f'say match {format_expr(node.exprs[0].expr)}:', indent)
         exprs = ', '.join(format_expr(x) for x in node.exprs)
         return f'{pad}say {exprs}' if exprs else f'{pad}say'
+    if isinstance(node, AssertStmt):
+        s = f'{pad}assert {format_expr(node.cond)}'
+        if node.message is not None:
+            s += f', {format_expr(node.message)}'
+        return s
     if isinstance(node, ExprStmt):
         return f'{pad}{format_expr(node.expr)}'
     if isinstance(node, IfStmt):

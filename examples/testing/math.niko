@@ -1,0 +1,5 @@
+to add with a, b:
+  give back a + b
+
+to mul with a, b:
+  give back a * b

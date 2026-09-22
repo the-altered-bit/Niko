@@ -125,6 +125,12 @@ class Checker:
             for x in n.exprs:
                 if isinstance(x,MatchExpr): self.match_expr(x,return_type)
                 else: self.expr(x)
+        elif isinstance(n,AssertStmt):
+            t=self.expr(n.cond)
+            if t not in (BOOLEAN,ANY): self.error(n.line,f'assert condition must be boolean, got {t}')
+            if n.message is not None:
+                mt=self.expr(n.message)
+                if mt not in (TEXT,ANY): self.error(n.line,f'assert message must be text, got {mt}')
         elif isinstance(n,ExprStmt): self.expr(n.expr)
         elif isinstance(n,ReturnStmt):
             got=NOTHING if n.expr is None else (self.match_expr(n.expr,return_type) if isinstance(n.expr,MatchExpr) else self.expr(n.expr))
