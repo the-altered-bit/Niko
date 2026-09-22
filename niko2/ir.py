@@ -36,6 +36,12 @@ class IRBuilder:
         self.code.append(Instruction(op,arg,line)); return len(self.code)-1
     def patch(self,pos,target): self.code[pos]=Instruction(self.code[pos].op,target,self.code[pos].line)
     def const(self,v,line=0):
-        try: return self.constants.index(v)
-        except ValueError: self.constants.append(v); return len(self.constants)-1
+        # Alpha 30: dedupe only across exact-type matches. The old
+        # constants.index(v) used Python ==, so True==1, False==0 and
+        # 1==1.0 collided; with operand-returning and/or (Alpha 30) that
+        # silently returned the wrong constant (e.g. `say yes and 1`
+        # printing `yes` because the 1 literal reused the True slot).
+        for i,c in enumerate(self.constants):
+            if type(c) is type(v) and c==v: return i
+        self.constants.append(v); return len(self.constants)-1
     def finish(self): return ModuleCode(self.code,self.functions,self.constants)

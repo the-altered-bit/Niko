@@ -395,14 +395,17 @@ three language bugs, all fixed with regression tests in
 
 What remains (known limits, not bugs):
 
-- **`and` / `or` do not short-circuit.** Both operands always evaluate,
-  on all three backends (Niko 1's `niko.py` short-circuits, so this is a
-  semantic divergence from Niko 1). Guard idioms like
-  `if i < n and item (i + 1) of s is "*":` raise an index error when the
-  guard is false — write the bounds check as a nested `if` instead.
-  Short-circuit evaluation is future work (it needs jump-based codegen
-  in the VM, WASM, and native backends, plus a decision on what `and` /
-  `or` return).
+- **Alpha 28 dogfood note, fixed in Alpha 30:** `and` / `or` used to
+  evaluate both operands on all three backends (a real semantic
+  divergence from Niko 1) — guard idioms like
+  `if i < n and item (i + 1) of s is "*":` raised an index error when
+  the guard was false. Alpha 30 implements Niko 1's rule on
+  VM/WASM/native: short-circuit evaluation with operand-returning
+  semantics (falsy = `no`, `nothing`, `0`, `0.0`, `""`, `[]`, `{}`;
+  everything else truthy). Historical note: the fix also required
+  a constant-pool dedup fix in `niko2/ir.py` (`True`/`1` used to
+  collide) and a latent native `while`-condition fix (conditions are
+  now evaluated inside the loop, not once before it).
 - **Runtime errors in imported modules report the entry file's path.**
   Check-time errors are re-tagged with the defining module's path, but
   a runtime failure inside a module says e.g. `Niko error in main.niko`

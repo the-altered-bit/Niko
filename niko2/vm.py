@@ -214,6 +214,16 @@ class VM:
                 elif op=='JUMP': f.ip=a
                 elif op=='JUMP_IF_FALSE':
                     if not bool(f.stack.pop()):f.ip=a
+                elif op=='JUMP_IF_FALSE_OR_POP':
+                    # Alpha 30: short-circuit `and`. Falsy left stays on the
+                    # stack as the result and skips right; truthy left is
+                    # popped and right is evaluated for the result.
+                    if not bool(f.stack[-1]):f.ip=a
+                    else:f.stack.pop()
+                elif op=='JUMP_IF_TRUE_OR_POP':
+                    # Alpha 30: short-circuit `or`. Mirror of above.
+                    if bool(f.stack[-1]):f.ip=a
+                    else:f.stack.pop()
                 elif op=='ITER_REPEAT': f.iter_stack.append(iter(range(int(f.stack.pop()))))
                 elif op=='REPEAT_NEXT':
                     try: next(f.iter_stack[-1])
@@ -253,8 +263,6 @@ class VM:
             return a/b
         if op=='%':return a%b
         if op=='**':return a**b
-        if op=='and':return bool(a) and bool(b)
-        if op=='or':return bool(a) or bool(b)
         if op in ('==','is'):return a==b
         if op in ('!=','is not'):return a!=b
         if op in ('<','is smaller than'):return a<b

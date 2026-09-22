@@ -70,6 +70,14 @@ Expressions:
 math          + - * / % **  and parentheses         (no // ; use floor(a / b))
 comparison    is   is not   is bigger than   is smaller than   is at least   is at most   is in
 logic         and   or   not          values: yes  no  nothing
+                    `and`/`or` short-circuit and return an operand (Niko 1's
+                    rule, identical on all backends): `a and b` → `a` if `a`
+                    is falsy (else `b`); `a or b` → `a` if `a` is truthy
+                    (else `b`). The right side never evaluates when the left
+                    side decides. Falsy = `no`, `nothing`, `0`, `0.0`,
+                    `""`, `[]`, `{}`; everything else truthy. So
+                    `"" or "d"` → `"d"`, `0 and 99` → `0`, `yes and 42` →
+                    `42`, `no and no` → `no`. `and` binds tighter than `or`.
 lists         [1, 2, 3]      item N of X      length of X      numbers A to B (inclusive, counts down if A > B)
 records       {"name": "Niko", "age": 2}      record["name"]
 random        random A to B (whole number, inclusive)

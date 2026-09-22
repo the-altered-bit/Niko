@@ -413,6 +413,41 @@ match cases in `tests/test_formatter.py`.
   networked run of `cd examples/playground && node e2e.mjs` is still
   owed. Full suite green. See `RELEASE_NOTES_ALPHA29.md` /
   `ALPHA29_DESIGN.md`.
+- **Alpha 30 is complete**: short-circuit `and`/`or` with Niko 1's
+  operand-returning semantics, on all three backends. No new syntax,
+  no new builtins. The rule: `a and b` → `a` if `a` is falsy else
+  `b`; `a or b` → `a` if `a` is truthy else `b`; the right side never
+  evaluates when the left side decides; falsy = `no`, `nothing`, `0`,
+  `0.0`, `""`, `[]`, `{}` (everything else truthy) — identical to
+  Niko 1, which transpiles `and`/`or` straight to Python. Typechecker:
+  any operand types accepted (`'{op} requires booleans'` gone),
+  result `BOOLEAN` iff both operands boolean else `ANY`. VM: new
+  `JUMP_IF_FALSE_OR_POP` / `JUMP_IF_TRUE_OR_POP` opcodes (left value
+  stays when it decides, popped otherwise; truthiness via the VM's
+  existing `bool()`). WASM: new `_gen_short_circuit` (fresh result
+  local, `call truthy`, `br_if $end`, right side into the same local
+  only when reached). Native: C temp + branch per the `MatchExpr`
+  temp pattern. Two bugs fixed along the way: `niko2/ir.py`
+  constant-pool dedup used Python `==` so `True`/`1`/`1.0` collided —
+  operand-returning semantics made `say yes and 1` print `yes` (known
+  since Alpha 8, invisible until now); now dedupes on exact-type
+  match only. Native `WhileStmt` evaluated its condition once before
+  the loop — a statement-emitting `and`/`or` condition captured a
+  stale temp; now evaluated inside the loop (`while (1) { <cond>; if
+  (!truthy) break; }`). The SSG guard idiom `if i < n and item (i +
+  1) of s is "*":` works without the nested-`if` workaround. Tests:
+  new `tests/test_shortcircuit.py` (3-way VM/WASM/native
+  differential: truth tables, dedup cases, skipped-side-never-evaluates
+  incl. `1/0`, chained/mixed precedence, `if`/`while`+`stop`/`skip`/
+  `say`/call-arg/match-guard contexts, the SSG idiom both forms,
+  error attribution, typechecker rule); `tests/cases/logic.niko` +
+  `.out` extended with Niko 1's own value-semantics and never-call
+  cases (output captured from `niko.py` itself). Kept boundaries:
+  `yes * 2` still diverges (native number-only ops vs VM Python
+  semantics — pre-existing), runtime errors carry no line numbers in
+  `niko2 run` output. `examples/playground/niko2_bundle.js` rebuilt
+  from the Alpha 30 tree. Full suite green. See
+  `RELEASE_NOTES_ALPHA30.md` / `ALPHA30_DESIGN.md`.
 - **Alpha 19 is complete**: package registry + version-range solving.
   `niko2/semver.py` (range grammar: `*`, exact, partials, npm-style
   `^`/`~`, comparators, comma AND; `max_satisfying` solver,

@@ -3934,14 +3934,19 @@ class WasmCompiler:
             self._gen_expr(n.expr)
             w.call(self.h["unary"])
         elif isinstance(n, BinaryExpr):
-            try:
-                op = self._BINOP[n.op]
-            except KeyError:
-                raise CompileError(f"unknown operator '{n.op}'", line=line)
-            w.i32_const(line); w.i32_const(op)
-            self._gen_expr(n.left)
-            self._gen_expr(n.right)
-            w.call(self.h["binary"])
+            if n.op in ('and', 'or'):
+                # Alpha 30: short-circuit with Niko 1 (Python) semantics;
+                # see _gen_short_circuit.
+                self._gen_short_circuit(n)
+            else:
+                try:
+                    op = self._BINOP[n.op]
+                except KeyError:
+                    raise CompileError(f"unknown operator '{n.op}'", line=line)
+                w.i32_const(line); w.i32_const(op)
+                self._gen_expr(n.left)
+                self._gen_expr(n.right)
+                w.call(self.h["binary"])
         elif isinstance(n, CallExpr):
             self._gen_call(n)
         elif isinstance(n, MatchExpr):
@@ -3949,6 +3954,36 @@ class WasmCompiler:
         else:
             raise CompileError(f"the WASM backend can't compile {type(n).__name__} yet",
                                line=line)
+
+    def _gen_short_circuit(self, n):
+        # Alpha 30: short-circuit `and`/`or` with Niko 1 (Python)
+        # semantics: `a and b` evaluates `a`; if falsy the result is `a`
+        # and `b` is never evaluated, otherwise the result is `b`.
+        # `a or b` evaluates `a`; if truthy the result is `a` and `b` is
+        # never evaluated, otherwise the result is `b`. Truthiness goes
+        # through the `truthy` helper (same definition as the VM: no,
+        # nothing, 0, 0.0, "", [], {} are falsy; everything else truthy).
+        # Follows the _gen_match_expr convention: an empty block plus a
+        # fresh result local merges the two paths so exactly one value
+        # pointer is left on the stack (the writer's block() carries no
+        # result type, so the value travels through the local). The
+        # dropped left pointer needs no freeing: bump-allocated linear
+        # memory. Label depth stays correct because the block is opened
+        # and closed inside this call; the loop_stack (stop/skip) labels
+        # are absolute label objects resolved by the writer.
+        w = self.cur.w
+        self._gen_expr(n.left)
+        result = self.cur.new_local(); w.local_set(result)
+        end = w.block()
+        w.local_get(result)
+        w.call(self.h["truthy"])
+        if n.op == 'and':
+            w.i32_eqz()  # skip the right side when the left is falsy
+        w.br_if(end)     # `or` skips the right side when left is truthy
+        self._gen_expr(n.right)
+        w.local_set(result)
+        w.end()
+        w.local_get(result)
 
     def _gen_call(self, n):
         # Alpha 10: every call site evaluates the callee to a value and goes

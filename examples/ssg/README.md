@@ -78,11 +78,11 @@ through as escaped paragraph text, exactly as written:
 
 ## Niko notes (things the dogfooding surfaced)
 
-- **Niko 2's `and`/`or` do not short-circuit** (unlike Niko 1). Both
-  sides always evaluate, so guard idioms like
-  `if i < n and item (i + 1) of s is "*":` raise on the bounds check.
-  The converter uses nested `if`s instead. See
-  `niko2/KNOWN_LIMITATIONS.md` (Alpha 28).
+- **Niko 2's `and`/`or` short-circuit** (like Niko 1) since Alpha 30.
+  Guard idioms like `if i < n and item (i + 1) of s is "*":` are safe
+  now. The converter still uses nested `if`s — written that way when
+  short-circuiting didn't exist; it works either way. See
+  `niko2/KNOWN_LIMITATIONS.md` (Alpha 28 → fixed in Alpha 30).
 - Import aliases that shadow a builtin name (e.g.
   `import "stdlib/text.niko" as text`) now work inside module
   functions — this was broken before Alpha 28 (fixed in

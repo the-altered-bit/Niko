@@ -267,7 +267,16 @@ class Compiler:
             b.emit('BUILD_RECORD',len(n.items),n.line)
         elif isinstance(n,UnaryExpr): self.expr(n.expr,b); b.emit('UNARY',n.op,n.line)
         elif isinstance(n,BinaryExpr):
-            self.expr(n.left,b); self.expr(n.right,b); b.emit('BINARY',n.op,n.line)
+            if n.op in ('and','or'):
+                # Alpha 30: short-circuit codegen. The left value stays on the
+                # stack as the result when it decides; otherwise it's popped
+                # and the right side is evaluated for the result.
+                self.expr(n.left,b)
+                end=b.emit('JUMP_IF_FALSE_OR_POP' if n.op=='and' else 'JUMP_IF_TRUE_OR_POP',None,n.line)
+                self.expr(n.right,b)
+                b.patch(end,len(b.code))
+            else:
+                self.expr(n.left,b); self.expr(n.right,b); b.emit('BINARY',n.op,n.line)
         elif isinstance(n,IndexExpr): self.expr(n.obj,b); self.expr(n.index,b); b.emit('INDEX',line=n.line)
         elif isinstance(n,AttrExpr): self.expr(n.obj,b); b.emit('ATTR',n.name,n.line)
         elif isinstance(n,CallExpr):

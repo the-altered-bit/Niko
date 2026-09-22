@@ -1,2 +1,15 @@
 set a to 5
 say a is 5 and a is not 6, not yes, a is at least 5, a is at most 4, 3 is smaller than a, no or yes
+say "" or "d"
+say 0 and 99
+say 0.0 or "z"
+say nothing or "n"
+say no or "x"
+say yes and 42
+say no and no
+to sc_bomb:
+    say "BOOM"
+    give back 1
+say no and sc_bomb()
+say yes or sc_bomb()
+say "survived"

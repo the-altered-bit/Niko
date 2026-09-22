@@ -322,8 +322,9 @@ class Checker:
         if isinstance(n,BinaryExpr):
             a=self.expr(n.left);b=self.expr(n.right);op=n.op
             if op in ('and','or'):
-                if a not in (BOOLEAN,ANY) or b not in (BOOLEAN,ANY):self.error(n.line,f'{op} requires booleans')
-                return BOOLEAN
+                # Alpha 30: Python/Niko 1 short-circuit semantics. Any operand
+                # types accepted; result type is BOOLEAN only when both are.
+                return BOOLEAN if a==BOOLEAN and b==BOOLEAN else ANY
             if op in ('==','!=','is','is not','<','>','<=','>=','is smaller than','is bigger than','is at least','is at most','is in'):return BOOLEAN
             if op=='+':
                 if a==TEXT or b==TEXT:return TEXT

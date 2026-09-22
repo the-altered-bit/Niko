@@ -375,6 +375,25 @@ class NikoCCompiler:
                 raise CompileError(f"unknown operator '{n.op}'", line=line)
             return f'nval_unary({line}, {op}, {self.gen_expr(n.expr)})'
         if isinstance(n, BinaryExpr):
+            if n.op in ('and', 'or'):
+                # C's && / || can't express operand-value short-circuit
+                # semantics on NVal*: evaluate the left side into a temp,
+                # then conditionally evaluate the right side into the same
+                # temp. Follows the MatchExpr temp pattern: gen_expr runs
+                # before the enclosing _emit, and a fresh temp per call
+                # keeps nested and/or (e.g. `a and b and c`) safe. The
+                # skipped operand's C code never runs, so its runtime
+                # errors can never fire. No refcount to maintain: the
+                # runtime never frees NVal* (GC-less, malloc-everything),
+                # so overwriting the temp is scheme-correct.
+                t = self._tmp()
+                self._emit(f'NVal *{t} = {self.gen_expr(n.left)};')
+                if n.op == 'and':
+                    cond = f'nval_truthy({t})'
+                else:
+                    cond = f'!nval_truthy({t})'
+                self._emit(f'if ({cond}) {{ {t} = {self.gen_expr(n.right)}; }}')
+                return t
             try:
                 op = _BINOP[n.op]
             except KeyError:
@@ -556,8 +575,15 @@ class NikoCCompiler:
             self.loop_depth -= 1
             self._emit('} }')
         elif isinstance(n, WhileStmt):
+            # The condition is evaluated inside the loop (like the WASM
+            # backend's loop/block structure), not in the while() parens:
+            # a statement-emitting condition (and/or, match) must be
+            # recomputed every iteration -- a temp captured once before
+            # the loop would go stale and loop forever. For pure
+            # expressions this is equivalent to while (nval_truthy(c)).
+            self._emit('while (1) {')
             c = self.gen_expr(n.cond)
-            self._emit(f'while (nval_truthy({c})) {{')
+            self._emit(f'if (!nval_truthy({c})) break;')
             self.loop_depth += 1
             for s in n.body:
                 self.gen_stmt(s)
