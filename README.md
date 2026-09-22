@@ -205,3 +205,21 @@ documented limits: `and`/`or` don't short-circuit (both sides always
 evaluated), and runtime errors in imported modules report the entry
 file's path. See `RELEASE_NOTES_ALPHA28.md` / `ALPHA28_DESIGN.md`.
 `site/` is build output (regenerated, not committed).
+
+## Niko 2 Alpha 34 — `niko2 fmt` on the command line
+
+The editor's formatter (LSP `textDocument/formatting`) is now a CLI
+command. It runs the exact same pipeline — parse the whole document,
+`format_program` — so the terminal and the editor can never disagree.
+
+```bash
+niko2 fmt main.niko utils.niko   # rewrite in place, report each file changed
+niko2 fmt --check main.niko       # exit 1 if it would reformat, 0 if clean (CI)
+cat prog.niko | niko2 fmt         # stdin -> stdout
+```
+
+A file that fails to parse is reported with the usual caret diagnostic
+and left untouched; a missing file is a plain-English error. CRLF line
+endings are normalized to LF (matching what the editor already did).
+`niko2 format <file>` still prints one file's formatted source to
+stdout. See `RELEASE_NOTES_ALPHA34.md` / `ALPHA34_DESIGN.md`.

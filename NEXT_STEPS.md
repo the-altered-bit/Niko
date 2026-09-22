@@ -575,3 +575,24 @@ match cases in `tests/test_formatter.py`.
   entry marked fixed-in-Alpha-33, `json.niko` header updated,
   `STDLIB.md` regenerated. Full suite green. See
   `RELEASE_NOTES_ALPHA33.md` / `ALPHA33_DESIGN.md`.
+- **Alpha 34 is complete**: `niko2 fmt` — the editor formatter on the
+  command line. No refactor was needed: the formatter already lived in
+  `niko2/formatter.py` (`format_program`) with the LSP
+  `textDocument/formatting` handler as a thin wrapper, so the new CLI
+  (`fmt_source_text` + `cmd_fmt` in `niko2/cli.py`) runs the identical
+  pipeline — CLI and editor cannot disagree by construction, proven by
+  differential tests. `niko2 fmt [files...]` rewrites in place
+  (reporting `formatted <file>`); `--check` exits 1 with `would
+  reformat <file>` instead of writing (0 when clean); no files reads
+  stdin and writes stdout. Parse errors report the caret diagnostic and
+  leave the file untouched; missing files are plain-English errors.
+  `niko2 format` (stdout, single file) kept for backwards compatibility.
+  Argparse note: the shared `file` positional is `nargs='?'`, so
+  `main()` splits fmt's multi-file list out of argv before parsing
+  (same hoist pattern as `--update`). Documented decision: CRLF
+  normalizes to LF (what the LSP handler already did). Tests: new
+  `tests/test_fmt.py` (248 cases — LSP/shared and CLI-core/shared
+  differentials + idempotency over all 79 parseable .niko files under
+  tests/, examples/, niko2/stdlib/, plus CLI behavior tests). README
+  gained an Alpha 34 section. Full suite green. See
+  `RELEASE_NOTES_ALPHA34.md` / `ALPHA34_DESIGN.md`.

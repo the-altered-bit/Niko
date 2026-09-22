@@ -95,10 +95,66 @@ def run(src,name='<memory>'):
         print(_format_error(e, src, name)); return 1
     return 0
 
+def fmt_source_text(src,name):
+    """Format one Niko source string.
+
+    Returns (True, formatted) or (False, plain-English error message).
+    This is exactly the pipeline the LSP textDocument/formatting handler
+    runs (parse + format_program on the whole document), so the CLI and
+    the editor can never disagree.
+    """
+    try:
+        return True,format_program(parse(src))
+    except ParseError as e:
+        return False,_format_parse_error(e,src,name)
+
+def cmd_fmt(files,check_only):
+    """`niko2 fmt [files...] [--check]`.
+
+    No files: read stdin, write formatted source to stdout (--check:
+    silent, exit 0/1). With files: rewrite each file in place, printing
+    `formatted <file>` for every file that changed (--check: print
+    `would reformat <file>` and exit 1 instead of writing). A file that
+    fails to parse is reported and left untouched. Returns an exit code.
+    """
+    if not files:
+        src=sys.stdin.read()
+        ok,out=fmt_source_text(src,'<stdin>')
+        if not ok:
+            print(out,file=sys.stderr); return 1
+        if check_only:
+            return 0 if out==src else 1
+        sys.stdout.write(out); return 0
+    failed=False
+    would_change=[]
+    for f in files:
+        try:
+            src=Path(f).read_text(encoding='utf8')
+        except OSError as e:
+            print(f'Niko error: cannot read {f}: {e.strerror or e}'); failed=True; continue
+        ok,out=fmt_source_text(src,f)
+        if not ok:
+            print(out); failed=True; continue
+        if out==src:
+            continue
+        if check_only:
+            would_change.append(f); continue
+        try:
+            Path(f).write_text(out,encoding='utf8')
+        except OSError as e:
+            print(f'Niko error: cannot write {f}: {e.strerror or e}'); failed=True; continue
+        print(f'formatted {f}')
+    if check_only and would_change:
+        for f in would_change:
+            print(f'would reformat {f}')
+        return 1
+    return 1 if failed else 0
+
 def main():
     ap=argparse.ArgumentParser(prog='niko2',description='Niko 2 compiler/interpreter')
-    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','deps','lock','get','publish','lsp','debug','wasm','native','repl','test'])
+    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','fmt','deps','lock','get','publish','lsp','debug','wasm','native','repl','test'])
     ap.add_argument('file',nargs='?')
+    ap.add_argument('--check',action='store_true',help='(fmt) do not write files; exit 1 if any input would be reformatted')
     ap.add_argument('--force',action='store_true',help='(get/publish) reinstall the package even if it is already cached/published')
     ap.add_argument('--update',action='store_true',help='(get) re-resolve a registry package to the newest matching version and upgrade the install + lockfile pin')
     ap.add_argument('--registry',help='(publish) registry directory or index URL; default from NIKO_REGISTRY or ~/.niko/config.toml')
@@ -116,6 +172,13 @@ def main():
     if argv[:1]==['get'] and '--update' in argv:
         argv=[x for x in argv if x!='--update']
         update_requested=True
+    # Alpha 34: `niko2 fmt` accepts multiple files, which argparse's single
+    # `file` positional cannot express. Split the file list out before
+    # parsing; flags (like --check) stay in argv for argparse.
+    fmt_files=None
+    if argv[:1]==['fmt']:
+        fmt_files=[x for x in argv[1:] if not x.startswith('-')]
+        argv=[argv[0]]+[x for x in argv[1:] if x.startswith('-')]
     a=ap.parse_args(argv)
     a.update=a.update or update_requested
     if a.command=='lsp':
@@ -150,6 +213,9 @@ def main():
             print(format_parse_error(src, e, a.file)); return 1
         except OSError as e:
             print(f'Niko error in {a.file}: {e}'); return 1
+    # Alpha 34: `niko2 fmt` -- the editor formatter on the command line.
+    if a.command=='fmt':
+        return cmd_fmt(fmt_files,check_only=a.check)
     if a.command=='deps':
         root=find_project_root(a.file or '.')
         graph=collect_project_dependencies(root)
@@ -252,7 +318,7 @@ def main():
         print(f'✓ published {info["name"]} {info["version"]} to {info["spec"]}')
         return 0
     if not a.file:
-        print('Usage: niko2 run <file.niko|.nikoir> | niko2 check <file.niko> | niko2 format <file.niko> | niko2 deps [folder] | niko2 lock [folder] | niko2 get <package-directory|git-url> [--force] | niko2 get <name>[@<range>] [--force] | niko2 get --update <name> | niko2 publish [--registry <dir>] [--force] | niko2 init <folder> | niko2 lsp | niko2 debug | niko2 wasm <file.niko> [-o out.wasm] [--run] | niko2 native <file.niko> [-o out] [--run] [--emit-c] | niko2 test [dir]'); return 2
+        print('Usage: niko2 run <file.niko|.nikoir> | niko2 check <file.niko> | niko2 format <file.niko> | niko2 fmt [files...] [--check] | niko2 deps [folder] | niko2 lock [folder] | niko2 get <package-directory|git-url> [--force] | niko2 get <name>[@<range>] [--force] | niko2 get --update <name> | niko2 publish [--registry <dir>] [--force] | niko2 init <folder> | niko2 lsp | niko2 debug | niko2 wasm <file.niko> [-o out.wasm] [--run] | niko2 native <file.niko> [-o out] [--run] [--emit-c] | niko2 test [dir]'); return 2
 
     # Alpha 8: compile to WebAssembly.
     if a.command=='wasm':
