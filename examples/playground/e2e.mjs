@@ -7,6 +7,7 @@
  * then checks a broken program surfaces a compile error in the error pane.
  *
  *   node e2e.mjs            # run from examples/playground/
+ *   NIKO_CHROME=/path/to/chrome node e2e.mjs   # override the Chrome binary
  *
  * Exit codes: 0 = pass; 2 = Pyodide CDN unreachable (skip, NOT a pass);
  * anything else = real failure with a message on stderr.
@@ -39,7 +40,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const CHROME = "/opt/meta-chromium/chrome";
+const CHROME = process.env.NIKO_CHROME || "/opt/meta-chromium/chrome";
 const PYODIDE_JS = "https://cdn.jsdelivr.net/pyodide/v0.29.1/full/pyodide.js";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
