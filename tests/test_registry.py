@@ -62,13 +62,14 @@ _real_niko_had_config = (_real_niko / 'config.toml').exists()
 _real_niko_existed = _real_niko.exists()
 
 
-def _niko2(*args, cwd, env=None):
+def _niko2(*args, cwd, env=None, timeout=None):
     e = dict(os.environ)
     e['PYTHONPATH'] = str(project_root)
     if env:
         e.update(env)
     return subprocess.run([sys.executable, '-m', 'niko2', *args],
-                          capture_output=True, text=True, cwd=cwd, env=e)
+                          capture_output=True, text=True, cwd=cwd, env=e,
+                          timeout=timeout)
 
 
 def _expect_cli_error(args, cwd, *needles, env=None):
@@ -627,5 +628,371 @@ print('ok: in-process install_from_registry + resolve_registry')
 assert (_real_niko / 'config.toml').exists() == _real_niko_had_config
 assert _real_niko.exists() == _real_niko_existed
 print('ok: real ~/.niko untouched')
+
+# ---------------------------------------------------------------------------
+# Alpha 24: registry hardening — HTTP support + pinned transitive closure
+# ---------------------------------------------------------------------------
+# A second local registry, served over plain HTTP on 127.0.0.1 with an
+# ephemeral port (in-process thread). Everything below still talks only to
+# 127.0.0.1 — never the real network. `find_lock_dir` walks UP from a
+# project dir, so first make sure no stray niko.lock in an ancestor dir
+# (/tmp, /) can leak pins into the fixtures.
+import functools
+import http.server
+import socket
+import threading
+import time
+import urllib.error
+
+for _a24_ancestor in (pathlib.Path('/tmp'), pathlib.Path('/')):
+    assert not (_a24_ancestor / 'niko.lock').exists(), \
+        f'stray {_a24_ancestor / "niko.lock"} would contaminate fixtures'
+del _a24_ancestor
+
+REGH = SESSION / 'registry-http'
+REGH.mkdir(parents=True)
+_hsrc = pathlib.Path(tempfile.mkdtemp(prefix='niko-a24-src-'))
+_home_a24 = SESSION / 'home-a24'
+_home_a24.mkdir(parents=True)
+_servers = []
+
+
+def _hpublish(name, version, files, deps=None):
+    d = _hsrc / f'{name}-{version}'
+    _write_pkg(d, name, version, files, deps=deps)
+    r = _niko2('publish', '--registry', str(REGH), cwd=d)
+    assert r.returncode == 0, r.stderr or r.stdout
+
+
+class _QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *args, directory=None, **kwargs):
+        super().__init__(*args, directory=directory, **kwargs)
+
+    def log_message(self, *args, **kwargs):
+        pass
+
+
+def _serve_http(directory):
+    """Serve *directory* on 127.0.0.1, ephemeral port. Returns the index URL."""
+    handler = functools.partial(_QuietHandler, directory=str(directory))
+    srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+    port = srv.server_address[1]
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    _servers.append((srv, t))
+    return f'http://127.0.0.1:{port}/index.json'
+
+
+def _stop_http_servers():
+    for srv, t in _servers:
+        srv.shutdown()
+        srv.server_close()
+        t.join(timeout=10)
+    _servers.clear()
+
+
+def _http_env(url, cache=None):
+    e = {'NIKO_REGISTRY': url, 'HOME': str(_home_a24)}
+    if cache is not None:
+        e['NIKO_PKG_CACHE'] = str(cache)
+    return e
+
+
+def _refused_url():
+    """An http://127.0.0.1 URL with nothing listening: fails fast."""
+    s = socket.socket()
+    s.bind(('127.0.0.1', 0))
+    port = s.getsockname()[1]
+    s.close()
+    return f'http://127.0.0.1:{port}/index.json'
+
+
+# Fixture packages for the HTTP registry. Versions that must "appear later"
+# (clib 1.2.0, upd/updep 2.0.0) are published mid-test on purpose.
+_hpublish('httplib', '1.0.0', {'main.niko': 'set hver to "1.0.0"\n'})
+_hpublish('httplib', '1.1.0', {'main.niko': 'set hver to "1.1.0"\n'})
+_hpublish('httplib', '2.0.0', {'main.niko': 'set hver to "2.0.0"\n'})
+_hpublish('badhttp', '1.0.0', {'main.niko': 'say 1\n'})
+_hpublish('clib', '1.0.0', {'main.niko': 'set b_ver to "1.0.0"\n'})
+_hpublish('clib', '1.1.0', {'main.niko': 'set b_ver to "1.1.0"\n'})
+_hpublish('capp', '1.0.0',
+          {'main.niko': 'import "pkg:clib/main.niko" as b\nsay b.b_ver\n'},
+          deps={'clib': '^1.0'})
+_hpublish('upd', '1.0.0', {'main.niko': 'say "upd1"\n'}, deps={'updep': '^1.0'})
+_hpublish('updep', '1.0.0', {'main.niko': 'set e_ver to "1.0.0"\n'})
+_hpublish('updep', '1.1.0', {'main.niko': 'set e_ver to "1.1.0"\n'})
+_hpublish('cycA24', '1.0.0', {'main.niko': 'say "a24"\n'},
+          deps={'cycB24': '^1.0'})
+_hpublish('cycB24', '1.0.0', {'main.niko': 'say "b24"\n'},
+          deps={'cycA24': '^1.0'})
+_hpublish('confg', '1.0.0', {'main.niko': 'set g_ver to "1.0.0"\n'})
+_hpublish('confg', '2.0.0', {'main.niko': 'set g_ver to "2.0.0"\n'})
+_hpublish('conff', '1.0.0', {'main.niko': 'say "f"\n'}, deps={'confg': '^1.0'})
+_hpublish('confh', '1.0.0', {'main.niko': 'say "h"\n'}, deps={'confg': '^2.0'})
+
+# Corrupt badhttp's tarball AFTER publish (the index keeps the real hash).
+_btgz = REGH / 'tarballs' / 'badhttp-1.0.0.tar.gz'
+with open(_btgz, 'r+b') as f:
+    f.seek(-8, 2)
+    f.write(b'CORRUPT!')
+del _btgz
+
+http_index_url = _serve_http(REGH)
+henv = _http_env(http_index_url)
+print('ok: HTTP registry fixture (published + served on 127.0.0.1)')
+
+# -- 15. HTTP get by name and by range -----------------------------------------
+from niko2.registry import _tarball_url  # noqa: E402
+# tarballs really resolve to http:// URLs for a remote registry
+assert _tarball_url(resolve_registry(http_index_url),
+                    'tarballs/httplib-2.0.0.tar.gz').startswith('http://127.0.0.1:')
+
+proj_h = pathlib.Path(tempfile.mkdtemp(prefix='niko-a24-hproj-'))
+r = _niko2('get', 'httplib', cwd=proj_h, env=henv)
+assert r.returncode == 0, r.stderr or r.stdout
+assert '✓ installed httplib 2.0.0' in r.stdout, r.stdout
+assert _cache('httplib-2.0.0').is_dir()
+lock_h = json.loads((proj_h / 'niko.lock').read_text(encoding='utf8'))
+pin_h = lock_h['packages']['httplib']
+assert pin_h['version'] == '2.0.0' and pin_h['range'] == '*', pin_h
+assert pin_h['source'] == f'registry:{http_index_url}', pin_h
+
+proj_h2 = pathlib.Path(tempfile.mkdtemp(prefix='niko-a24-hproj2-'))
+r = _niko2('get', 'httplib@^1.0', cwd=proj_h2, env=henv)
+assert r.returncode == 0, r.stderr or r.stdout
+assert '✓ installed httplib 1.1.0' in r.stdout, r.stdout
+lock_h2 = json.loads((proj_h2 / 'niko.lock').read_text(encoding='utf8'))
+assert lock_h2['packages']['httplib']['version'] == '1.1.0', lock_h2
+assert lock_h2['packages']['httplib']['range'] == '^1.0', lock_h2
+print('ok: HTTP get by name and by range (tarballs over HTTP, pin recorded)')
+
+# -- 16. sha256 mismatch over HTTP: hard error, no partial install -------------
+_tmp_before = set(pathlib.Path('/tmp').glob('niko-reg-*'))
+proj_bh = pathlib.Path(tempfile.mkdtemp(prefix='niko-a24-badhttp-'))
+_expect_cli_error(('get', 'badhttp'), proj_bh, 'sha256 mismatch', 'badhttp',
+                  '1.0.0', 'deleted the bad download', env=henv)
+assert not _cache('badhttp-1.0.0').exists(), \
+    'corrupt package must leave nothing in the cache'
+assert not (proj_bh / 'niko.lock').exists(), \
+    'failed get must not write a lockfile pin'
+assert set(pathlib.Path('/tmp').glob('niko-reg-*')) == _tmp_before, \
+    'failed download left a temp dir behind'
+del _tmp_before
+print('ok: sha256 mismatch over HTTP (no partial install, no temp litter)')
+
+# -- 17. network failures: plain-English errors, fast ---------------------------
+from niko2.registry import _network_error, _FETCH_TIMEOUT  # noqa: E402
+# The timeout is deliberately short: a dead host must fail fast, not hang.
+assert _FETCH_TIMEOUT == 10, _FETCH_TIMEOUT
+
+# unreachable host (refused port on 127.0.0.1): instant, plain English
+proj_ref = pathlib.Path(tempfile.mkdtemp(prefix='niko-a24-refused-'))
+_t0 = time.monotonic()
+_expect_cli_error(('get', 'httplib'), proj_ref,
+                  'connection refused', 'is anything serving the registry',
+                  '127.0.0.1', env=_http_env(_refused_url()))
+_dt = time.monotonic() - _t0
+assert _dt < 5, \
+    f'refused-port get took {_dt:.1f}s -- must fail fast, not wait out the timeout'
+del _t0, _dt
+
+# error taxonomy, in-process (hermetic: no sockets are opened)
+_u = 'http://registry.example/index.json'
+_http_err = urllib.error.HTTPError(_u, 404, 'Not Found', {}, None)
+_msg = _network_error('registry index', _u, _http_err)
+assert 'HTTP 404 Not Found' in _msg, _msg
+assert 'could not fetch registry index' in _msg, _msg
+_msg = _network_error('registry index', 'http://nosuch.invalid/index.json',
+                      urllib.error.URLError(
+                          socket.gaierror(-2, 'Name or service not known')))
+assert 'could not resolve "nosuch.invalid"' in _msg, _msg
+assert 'DNS failure' in _msg, _msg
+_msg = _network_error('registry index', _u,
+                      urllib.error.URLError(
+                          ConnectionRefusedError(111, 'Connection refused')))
+assert 'connection refused' in _msg, _msg
+assert 'is anything serving the registry' in _msg, _msg
+_msg = _network_error('tarball for "x" 1.0.0', _u,
+                      urllib.error.URLError(socket.timeout('timed out')))
+assert 'timed out after 10 seconds' in _msg, _msg
+del _u, _http_err, _msg
+print('ok: unreachable host fails fast; error taxonomy (HTTP/DNS/refused/timeout)')
+
+# -- 18. bad index documents over HTTP ------------------------------------------
+_reg_garbage = SESSION / 'reg-garbage'
+_reg_garbage.mkdir()
+(_reg_garbage / 'index.json').write_text('this is not json {{{', encoding='utf8')
+_garbage_url = _serve_http(_reg_garbage)
+_reg_nopkgs = SESSION / 'reg-nopkgs'
+_reg_nopkgs.mkdir()
+(_reg_nopkgs / 'index.json').write_text('{"note": "no packages table"}\n',
+                                       encoding='utf8')
+_nopkgs_url = _serve_http(_reg_nopkgs)
+
+proj_idx = pathlib.Path(tempfile.mkdtemp(prefix='niko-a24-index-'))
+_expect_cli_error(('get', 'whatever'), proj_idx, 'not valid JSON',
+                  env=_http_env(_garbage_url))
+_expect_cli_error(('get', 'whatever'), proj_idx,
+                  'expected a JSON object with a "packages" table',
+                  env=_http_env(_nopkgs_url))
+# index path that 404s: the status lands in the message
+_missing_url = http_index_url.replace('/index.json', '/definitely-not-here.json')
+_expect_cli_error(('get', 'httplib'), proj_idx, 'HTTP 404',
+                  env=_http_env(_missing_url))
+del _reg_garbage, _garbage_url, _reg_nopkgs, _nopkgs_url, _missing_url
+print('ok: malformed index / missing packages table / HTTP 404 over HTTP')
+
+# -- 19. `niko2 lock` pins the full transitive closure --------------------------
+proj_c = pathlib.Path(tempfile.mkdtemp(prefix='niko-a24-closure-'))
+(proj_c / 'app.niko').write_text(
+    'import "pkg:capp/main.niko" as a\nsay "app"\n', encoding='utf8')
+r = _niko2('get', 'capp', cwd=proj_c, env=henv)
+assert r.returncode == 0, r.stderr or r.stdout
+assert '✓ installed capp 1.0.0' in r.stdout, r.stdout
+r = _niko2('lock', str(proj_c), cwd=proj_c, env=henv)
+assert r.returncode == 0, r.stderr or r.stdout
+lock_c = json.loads((proj_c / 'niko.lock').read_text(encoding='utf8'))
+assert lock_c['packages']['capp']['version'] == '1.0.0', lock_c
+assert lock_c['packages']['clib'] == {
+    'version': '1.1.0',                      # newest installed satisfying ^1.0
+    'source': f'registry:{http_index_url}',
+    'range': '^1.0',                          # the parent's requested range
+}, lock_c['packages']
+print('ok: lock pins the full closure (capp + transitive clib with range)')
+
+# -- 20. locked reinstall reproduces the pinned closure exactly -----------------
+# clib 1.2.0 appears AFTER the lock was written; a fresh cache must still
+# get the pinned 1.1.0. The backfill is strictly additive: it installs the
+# pin, never downgrades or removes anything.
+_hpublish('clib', '1.2.0', {'main.niko': 'set b_ver to "1.2.0"\n'})
+fresh_cache = SESSION / 'cache-a24'
+fresh_cache.mkdir()
+fenv = _http_env(http_index_url, cache=fresh_cache)
+r = _niko2('get', 'capp', cwd=proj_c, env=fenv)
+assert r.returncode == 0, r.stderr or r.stdout
+assert '✓ installed locked dependencies: clib 1.1.0' in r.stdout, r.stdout
+assert (fresh_cache / 'clib-1.1.0').is_dir(), \
+    'pinned clib 1.1.0 must be installed exactly, not skipped'
+# re-locking keeps the pin: never a silent upgrade to the newer 1.2.0
+r = _niko2('lock', str(proj_c), cwd=proj_c, env=fenv)
+assert r.returncode == 0, r.stderr or r.stdout
+lock_c2 = json.loads((proj_c / 'niko.lock').read_text(encoding='utf8'))
+assert lock_c2['packages']['clib']['version'] == '1.1.0', lock_c2
+assert lock_c2['packages']['clib']['range'] == '^1.0', lock_c2
+print('ok: locked reinstall installs pinned versions; re-lock never upgrades')
+
+# -- 21. resolution: the pin wins for direct imports -----------------------------
+# A direct `pkg:` import resolves through the project's niko.lock, so the
+# pinned 1.1.0 wins even though the installer also cached 1.2.0.
+(proj_c / 'use_b.niko').write_text(
+    'import "pkg:clib/main.niko" as b\nsay b.b_ver\n', encoding='utf8')
+r = _niko2('run', 'use_b.niko', cwd=proj_c, env=fenv)
+assert r.returncode == 0, r.stderr or r.stdout
+assert r.stdout == '1.1.0\n', repr(r.stdout)
+# KNOWN LIMIT (Alpha 24, see niko2/KNOWN_LIMITATIONS.md): a `pkg:` import
+# *inside* a cached package resolves by walking up from the cache dir,
+# where there is no niko.lock — so it sees the newest *cached* version
+# (1.2.0 here), not the project's 1.1.0 pin.
+(proj_c / 'via_a.niko').write_text(
+    'import "pkg:capp/main.niko" as a\nsay "done"\n', encoding='utf8')
+r = _niko2('run', 'via_a.niko', cwd=proj_c, env=fenv)
+assert r.returncode == 0, r.stderr or r.stdout
+assert r.stdout == '1.2.0\ndone\n', repr(r.stdout)
+print('ok: direct import honors the pin; nested import sees newest cached (known limit)')
+
+# -- 22. `get --update` re-resolves the updated package's subtree ---------------
+proj_u = pathlib.Path(tempfile.mkdtemp(prefix='niko-a24-update-'))
+(proj_u / 'app.niko').write_text(
+    'import "pkg:upd/main.niko" as u\nsay "u"\n', encoding='utf8')
+r = _niko2('get', 'upd', cwd=proj_u, env=henv)
+assert r.returncode == 0, r.stderr or r.stdout
+assert '✓ installed upd 1.0.0' in r.stdout, r.stdout
+r = _niko2('lock', str(proj_u), cwd=proj_u, env=henv)
+assert r.returncode == 0, r.stderr or r.stdout
+lock_u = json.loads((proj_u / 'niko.lock').read_text(encoding='utf8'))
+assert lock_u['packages']['updep'] == {
+    'version': '1.1.0', 'source': f'registry:{http_index_url}', 'range': '^1.0'}, lock_u
+# The new major narrows the dep range (^1.0 -> ^2.0): the subtree must be
+# re-pinned, not left pointing at the old 1.1.0.
+_hpublish('updep', '2.0.0', {'main.niko': 'set e_ver to "2.0.0"\n'})
+_hpublish('upd', '2.0.0', {'main.niko': 'say "upd2"\n'}, deps={'updep': '^2.0'})
+r = _niko2('get', '--update', 'upd', cwd=proj_u, env=henv)
+assert r.returncode == 0, r.stderr or r.stdout
+assert '✓ updated upd 1.0.0 → 2.0.0' in r.stdout, r.stdout
+lock_u2 = json.loads((proj_u / 'niko.lock').read_text(encoding='utf8'))
+assert lock_u2['packages']['upd']['version'] == '2.0.0', lock_u2
+assert lock_u2['packages']['updep'] == {
+    'version': '2.0.0', 'source': f'registry:{http_index_url}', 'range': '^2.0'}, lock_u2
+print('ok: get --update re-pins the subtree when the dep range narrows')
+
+# -- 23. dependency cycle terminates in `get` AND `lock` ------------------------
+proj_cy = pathlib.Path(tempfile.mkdtemp(prefix='niko-a24-cycle-'))
+(proj_cy / 'app.niko').write_text(
+    'import "pkg:cycA24/main.niko" as a\nsay "cy"\n', encoding='utf8')
+try:
+    r = _niko2('get', 'cycA24', cwd=proj_cy, env=henv, timeout=60)
+except subprocess.TimeoutExpired:
+    raise AssertionError('get cycA24 hung: dependency cycle did not terminate')
+assert r.returncode == 0, r.stderr or r.stdout
+assert _cache('cycA24-1.0.0').is_dir() and _cache('cycB24-1.0.0').is_dir()
+try:
+    r = _niko2('lock', str(proj_cy), cwd=proj_cy, env=henv, timeout=60)
+except subprocess.TimeoutExpired:
+    raise AssertionError('lock hung on a dependency cycle')
+assert r.returncode == 0, r.stderr or r.stdout
+lock_cy = json.loads((proj_cy / 'niko.lock').read_text(encoding='utf8'))
+assert set(lock_cy['packages']) == {'cycA24', 'cycB24'}, lock_cy
+print('ok: dependency cycle (a<->b) terminates in get and lock')
+
+# -- 24. conflicting live requirements: clear error naming both -----------------
+proj_cf = pathlib.Path(tempfile.mkdtemp(prefix='niko-a24-conflict-'))
+(proj_cf / 'app.niko').write_text(
+    'import "pkg:conff/main.niko" as f\nimport "pkg:confh/main.niko" as h\nsay "cf"\n',
+    encoding='utf8')
+r = _niko2('get', 'conff', cwd=proj_cf, env=henv)
+assert r.returncode == 0, r.stderr or r.stdout
+r = _niko2('get', 'confh', cwd=proj_cf, env=henv)
+assert r.returncode == 0, r.stderr or r.stdout
+_expect_cli_error(('lock', str(proj_cf)), proj_cf,
+                  'conflicting requirements for package "confg"',
+                  '"confh" needs "^2.0"', '1.0.0',
+                  'required as "^1.0" by "conff"',
+                  'niko2 get confg@<range>', env=henv)
+print('ok: conflicting requirements fail with a clear, actionable error')
+
+# -- 25. backfill is additive; local-dir + file:// registries unaffected ---------
+from niko2.registry import ensure_locked_closure_installed  # noqa: E402
+# everything pinned is cached -> strictly a no-op
+assert ensure_locked_closure_installed(proj_c) == []
+# non-registry pins are skipped, never fetched
+proj_nr = pathlib.Path(tempfile.mkdtemp(prefix='niko-a24-nonreg-'))
+(proj_nr / 'niko.lock').write_text(
+    json.dumps({'packages': {'ghost': {'version': '9.9.9',
+                                       'source': '/no/such/dir'}}}),
+    encoding='utf8')
+assert ensure_locked_closure_installed(proj_nr) == []
+
+# stop the HTTP server(s): the rest must work with zero network
+_stop_http_servers()
+
+proj_ld = pathlib.Path(tempfile.mkdtemp(prefix='niko-a24-localdir-'))
+r = _niko2('get', 'httplib@1.0.0', '--force', cwd=proj_ld,
+           env={'NIKO_REGISTRY': str(REGH), 'HOME': str(_home_a24)})
+assert r.returncode == 0, r.stderr or r.stdout
+assert '✓ installed httplib 1.0.0' in r.stdout, r.stdout
+proj_fu = pathlib.Path(tempfile.mkdtemp(prefix='niko-a24-fileurl-'))
+r = _niko2('get', 'httplib@1.1.0', '--force', cwd=proj_fu,
+           env={'NIKO_REGISTRY': REGH.as_uri(), 'HOME': str(_home_a24)})
+assert r.returncode == 0, r.stderr or r.stdout
+assert '✓ installed httplib 1.1.0' in r.stdout, r.stdout
+lock_fu = json.loads((proj_fu / 'niko.lock').read_text(encoding='utf8'))
+assert lock_fu['packages']['httplib']['source'].startswith('registry:file://'), lock_fu
+print('ok: backfill additive; local-dir + file:// registries unaffected')
+
+# -- 26. hermeticity, again: the HTTP fixtures never touched the real world ----
+assert (_real_niko / 'config.toml').exists() == _real_niko_had_config
+assert _real_niko.exists() == _real_niko_existed
+assert not pathlib.Path('/tmp/niko.lock').exists(), 'stray /tmp/niko.lock'
+print('ok: real ~/.niko untouched (Alpha 24 HTTP fixtures)')
 
 print('test_registry.py: all assertions passed')

@@ -259,18 +259,40 @@ generated code). Same value model as WASM (boxed values, f64 numbers).
   block (checker error: `'use' is only allowed at the top of a file,
   not inside a function`).
 
-## Alpha 19 package manager limits
+## Alpha 19/24 package manager limits
 
-- **No auth, no remote publish.** Registries can be local directories
-  or remote index URLs, but `niko2 publish` only publishes to local
+What's fixed (Alpha 24):
+
+- **Transitive dependencies are pinned in the lockfile.** `niko2 lock`
+  writes `{version, source, range}` for every transitive dependency
+  (`range` = the parent package's requested range); re-locking never
+  silently upgrades; `get --update` re-resolves and re-pins the updated
+  package's subtree.
+- **Locked reinstall.** After every registry `get`, the CLI installs any
+  lockfile-pinned (registry-source) versions missing from the cache,
+  exactly as pinned — strictly additive, never downgrades/removes.
+- **HTTP(S) registries work**, with a 10s fetch timeout and plain-English
+  errors for HTTP status / DNS failure / connection refused / timeout.
+  Downloads are verified (sha256) before the cache is touched, so a bad
+  download can never leave a half-installed package.
+
+What remains:
+
+- **No auth, no remote publish.** Registries can be local directories or
+  remote index URLs, but `niko2 publish` only publishes to local
   directory registries — publishing to a remote registry is refused
   with "publishing needs auth, which is not supported yet". There is
-  no registry account model at all.
-- **Transitive dependencies are not pinned in the lockfile.** Only
-  directly-installed packages get `niko.lock` pins (written by
-  `niko2 get <name>[@<range>]`, kept by `niko2 lock`); a transitive
-  dependency's exact version comes from the cache plus its declared
-  range, re-resolved on each fresh install.
+  no registry account model at all. (A registry is just static files —
+  `index.json` + `tarballs/`; publish locally, then sync the directory
+  to any static file host. See `ALPHA24_DESIGN.md` "Static-hosting
+  recipe".)
+- **A `pkg:` import *inside* an installed package resolves to the newest
+  *cached* version, not the lockfile pin.** `locked_package_versions`
+  walks up from the importing file; inside the cache directory there is
+  no `niko.lock`, so nested imports see the newest cached version.
+  Direct `pkg:` imports from your project always honor the pin
+  (pre-existing Alpha 16 behavior; pinned by a test in
+  `tests/test_registry.py`).
 - **No version-range solving at import time.** `import "pkg:…"` takes no
   version — the `niko.lock` pin decides, with the newest cached version
   as fallback when there is no lockfile. The solver runs only in

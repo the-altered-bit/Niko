@@ -511,10 +511,139 @@ def _read_lock_packages(root):
     return pkgs if isinstance(pkgs, dict) else {}
 
 
+def _closure_conflict(dep, parent, dep_range, pinned_version, origin_desc):
+    """Plain-English error for two live requirements on one package."""
+    return (
+        f'conflicting requirements for package "{dep}": "{parent}" needs '
+        f'"{dep_range}", but it is already pinned to {pinned_version} '
+        f'({origin_desc}) -- the lockfile holds one version per package. '
+        f'To fix: run \'niko2 get {dep}@<range>\' with a range both '
+        f'requirements accept, then \'niko2 lock\' again.')
+
+
+def _transitive_closure_pins(seed_pins, prior_pins, cache_root=None):
+    """Resolve the transitive dependency closure for *seed_pins*.
+
+    *seed_pins* maps package name -> lockfile entry for the packages
+    already pinned (the project's top-level imports); *prior_pins* is
+    the previous lockfile's ``"packages"`` table (it may pin names that
+    are no longer top-level imports). Returns ``{name: entry}`` for
+    every TRANSITIVE dependency (seed names never appear), each entry
+    shaped ``{'version', 'source', 'range'}``.
+
+    Resolution rule -- mirrors the installer's preference for cached
+    versions (``registry._ensure_dependencies`` leaves a satisfied dep
+    alone) and the top-level "re-locking never silently upgrades" rule:
+    a dependency that is already pinned -- in *seed_pins*, earlier in
+    this walk, or in *prior_pins* -- keeps its pin when the pinned
+    version is installed and satisfies the requesting parent's range;
+    otherwise the newest installed version satisfying the range is
+    pinned. A dependency with no installed version satisfying the range
+    is a hard error naming ``niko2 get``. Two *live* requirements (both
+    in the current graph) that admit no common pinned version are a
+    hard conflict error naming both. A stale *prior_pins* entry that no
+    longer satisfies is simply re-resolved, never an error.
+
+    The recorded ``range`` is the range requested by the parent whose
+    requirement caused the pin (first parent wins when several parents
+    agree on the pinned version). Cycle-safe: each package's own
+    dependencies are expanded at most once, so a<->b terminates.
+    """
+    table = {n: dict(e) for n, e in seed_pins.items()}
+    origins = {n: 'pinned by the project' for n in seed_pins}
+    pins = {}
+    expanded = set()
+    queue = sorted(table)
+    while queue:
+        name = queue.pop(0)
+        if name in expanded:
+            continue
+        expanded.add(name)
+        version = table[name]['version']
+        manifest = parse_manifest(
+            cache_dir_for(name, version, cache_root) / 'niko.toml')
+        for dep, dep_range in sorted(manifest.dependencies.items()):
+            if dep in table:
+                # Pinned by the project, by this walk, or adopted from
+                # the previous lockfile below: keep it when it
+                # satisfies this parent too; otherwise the two live
+                # requirements genuinely conflict.
+                if semver.satisfies(table[dep]['version'], dep_range):
+                    continue
+                raise PackageError(_closure_conflict(
+                    dep, name, dep_range, table[dep]['version'],
+                    origins.get(dep, 'pinned by the project')))
+            prior = prior_pins.get(dep)
+            if (isinstance(prior, dict) and prior.get('version')
+                    and cache_dir_for(dep, prior['version'],
+                                      cache_root).is_dir()
+                    and semver.satisfies(prior['version'], dep_range)):
+                # A previous lockfile's pin that still fits: adopt it
+                # (re-locking never silently upgrades).
+                table[dep] = dict(prior)
+                pins[dep] = dict(prior)
+                origins[dep] = (
+                    'pinned by the previous lockfile'
+                    + (f' (as "{prior.get("range")}")'
+                       if prior.get('range') else ''))
+                queue.append(dep)
+                continue
+            cands = [v for _, v, _ in installed_versions(dep, cache_root)
+                     if semver.satisfies(v, dep_range)]
+            if not cands:
+                raise PackageError(
+                    f'package "{dep}" is required by "{name}" '
+                    f'("{dep_range}") but no installed version satisfies '
+                    f'that range -- run \'niko2 get {dep}@{dep_range}\' '
+                    'to install it first')
+            best = cands[-1]  # installed_versions returns oldest-first
+            record = read_source_record(
+                cache_dir_for(dep, best, cache_root))
+            entry = {'version': best,
+                     'source': record.get('source') or 'unknown',
+                     'range': dep_range}
+            table[dep] = entry
+            pins[dep] = entry
+            origins[dep] = f'required as "{dep_range}" by "{name}"'
+            queue.append(dep)
+    return pins
+
+
+def pin_closure_under(lock_dir, top_name, cache_root=None):
+    """Recompute lockfile pins for the dependency closure under *top_name*.
+
+    Used by ``niko2 get --update <name>`` after the top-level pin is
+    rewritten: the updated package's ``[dependencies]`` (name -> range,
+    from its newly installed manifest) are resolved with the same rule
+    as ``niko2 lock`` (see ``_transitive_closure_pins``) and written
+    back with ``write_package_pin``. Returns the ``{name: entry}`` pins
+    written.
+
+    Only the closure beneath *top_name* is touched: pins belonging to
+    other top-level packages are left alone, and stale entries (a dep
+    the new version no longer needs) are left in place -- they are
+    harmless, and the next ``niko2 lock`` re-derives the whole table
+    from scratch and drops them.
+    """
+    prior = _read_lock_packages(lock_dir)
+    top = prior.get(top_name)
+    if not isinstance(top, dict) or not top.get('version'):
+        raise PackageError(
+            f'package "{top_name}" is not pinned in '
+            f'{Path(lock_dir) / "niko.lock"}')
+    new_pins = _transitive_closure_pins({top_name: dict(top)}, prior,
+                                        cache_root)
+    for dep, entry in sorted(new_pins.items()):
+        write_package_pin(lock_dir, dep, entry['version'],
+                          entry['source'], entry.get('range'))
+    return new_pins
+
+
 def lock_packages_for_project(root, cache_root=None):
     """Build the ``"packages"`` lockfile table for a project: every
     package imported via ``pkg:`` anywhere under *root*, pinned to a
-    version with its install source.
+    version with its install source -- plus the full transitive
+    dependency closure beneath them (Alpha 24).
 
     Rules: a previously locked version that is still installed is kept
     (re-locking never silently upgrades); otherwise the newest cached
@@ -526,6 +655,13 @@ def lock_packages_for_project(root, cache_root=None):
     field, keeping the Alpha 16 ``{version, source}`` shape
     backwards-compatible. An imported package that isn't installed
     at all is a hard error naming ``niko2 get``.
+
+    Transitive entries have the same ``{version, source, range?}``
+    shape; their ``range`` is the range requested by the parent package
+    whose requirement caused the pin (see ``_transitive_closure_pins``
+    for the exact resolution rule, cycle handling, and conflict
+    errors). Extra entries are harmless to ``locked_package_versions``,
+    which reads only ``{name: version}`` pairs.
     """
     root = Path(root)
     names = sorted({spec[len(PKG_IMPORT_PREFIX):].partition('/')[0]
@@ -557,6 +693,9 @@ def lock_packages_for_project(root, cache_root=None):
         if prev_range or rec_range:
             entry['range'] = prev_range or rec_range
         locked[name] = entry
+    # Alpha 24: pin the full transitive closure, not just the top-level
+    # imports -- this is what makes a committed lockfile reproducible.
+    locked.update(_transitive_closure_pins(locked, existing, cache_root))
     return locked
 
 

@@ -258,6 +258,26 @@ match cases in `tests/test_formatter.py`.
   `test_no_breakpoint_refire_on_call_line` DAP case, formatter `use`
   quote case, `use`-in-function checker + CLI cases. Full suite green.
   See `RELEASE_NOTES_ALPHA23.md` / `ALPHA23_DESIGN.md`.
+- **Alpha 24 is complete**: registry hardening. HTTP(S) registries work
+  end to end (`NIKO_REGISTRY=http://…/index.json`; `file://` never touches
+  the network); fetch timeout 30 → 10s with plain-English errors for HTTP
+  status / DNS failure / connection refused / timeout; no-partial-install
+  ordering (cache touched only after download + sha256 + manifest checks).
+  `niko2 lock` pins the full transitive closure (`{version, source,
+  range}` per package, `range` = the parent's requested range; re-locking
+  never silently upgrades; conflicting live requirements are a hard error
+  naming both parents/ranges and the fix; cycles terminate). After every
+  registry `get`, the CLI backfills lockfile-pinned versions missing from
+  the cache, exactly (`✓ installed locked dependencies: b 1.1.0`,
+  strictly additive), so a fresh machine reproduces the author's tree.
+  `get --update` re-resolves and re-pins the updated package's subtree.
+  Known limit (pre-existing, now tested + documented): a `pkg:` import
+  *inside* a cached package resolves to the newest *cached* version, not
+  the pin — direct project imports always honor the pin. Auth and remote
+  publish remain future work. Tests: 11 new `tests/test_registry.py`
+  Alpha 24 sections (hermetic HTTP fixture on 127.0.0.1); worked example
+  `examples/registry-http/` (publish → serve → get → lock → run).
+  Full suite green. See `RELEASE_NOTES_ALPHA24.md` / `ALPHA24_DESIGN.md`.
 - **Alpha 19 is complete**: package registry + version-range solving.
   `niko2/semver.py` (range grammar: `*`, exact, partials, npm-style
   `^`/`~`, comparators, comma AND; `max_satisfying` solver,

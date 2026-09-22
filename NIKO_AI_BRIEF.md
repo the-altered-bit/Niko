@@ -203,16 +203,30 @@ lockfile pin → newest cached version in `~/.niko/packages` (override with
 
 Packages can also come from a **registry**: `niko2 publish
 [--registry <dir>]` publishes the current package (local-directory
-registries only — no auth yet), and `niko2 get <name>` / `niko2 get
+registries only — no auth yet; a registry is just static files,
+`index.json` + `tarballs/`, so publish locally and sync the dir to any
+static host), and `niko2 get <name>` / `niko2 get
 <name>@<range>` installs the newest version satisfying the range
 (`*`, `1.2.3`, `1.2`, npm-style `^1.2.3`/`~1.2.3`, comparators,
 comma AND), writing the pin `{version, source, range}` to `niko.lock`.
-`niko2 get --update <name>` upgrades to the newest matching version.
-The registry is selected by `NIKO_REGISTRY` (index URL, `file://` URL,
-or local dir) or `~/.niko/config.toml` `[registry] url`. Packages
-declare `[dependencies]` (name → range) in `niko.toml`; `get` installs
-the transitive closure from the same registry. `examples/packages/`
-holds a worked example.
+`niko2 get --update <name>` upgrades to the newest matching version and
+re-pins the updated package's dependency subtree. The registry is
+selected by `NIKO_REGISTRY` (`http(s)://` index URL, `file://` URL, or
+local dir) or `~/.niko/config.toml` `[registry] url`; HTTP fetches use a
+10s timeout with plain-English errors (HTTP status / DNS / refused /
+timeout), and downloads are sha256-verified before the cache is touched.
+Packages declare `[dependencies]` (name → range) in `niko.toml`; `get`
+installs the transitive closure from the same registry, and `niko2 lock`
+pins the whole closure (`{version, source, range}` per package, `range`
+= the parent's requested range; re-locking never silently upgrades, and
+conflicting live requirements are a hard error). After every registry
+`get`, the CLI backfills any lockfile-pinned versions missing from the
+cache, exactly (`✓ installed locked dependencies: …`), so a fresh machine
+reproduces the author's tree. One caveat: a `pkg:` import *inside* an
+installed package resolves to the newest *cached* version, not the pin
+(direct project imports always honor the pin). `examples/packages/`
+holds a worked package-manager example; `examples/registry-http/` walks
+through publish → serve over HTTP → get → lock → run.
 
 ## 5. Error messages (part of the language design)
 

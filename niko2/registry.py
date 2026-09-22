@@ -15,7 +15,10 @@ flavours are supported:
 * **Remote registry** -- ``NIKO_REGISTRY`` (or the config file) points at
   the index document's ``http(s)://`` URL. ``niko2 get`` can install from
   it; ``niko2 publish`` refuses (no auth story yet -- plain-English
-  error telling the user to use a local directory registry).
+  error telling the user to use a local directory registry). Fetches
+  use a short timeout (10s) and report plain-English errors for the
+  common failure modes (DNS failure, connection refused, timeout, HTTP
+  status).
 
 Index document format (JSON)::
 
@@ -56,8 +59,10 @@ import hashlib
 import json
 import os
 import shutil
+import socket
 import tarfile
 import tempfile
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -72,6 +77,7 @@ from .packages import (
     find_lock_dir,
     installed_versions,
     parse_manifest,
+    pin_closure_under,
     write_package_pin,
 )
 
@@ -88,8 +94,12 @@ INDEX_FILENAME = 'index.json'
 #: Subdirectory of a local registry holding published tarballs.
 TARBALL_DIRNAME = 'tarballs'
 
-#: Network timeout for remote registry fetches (seconds).
-_FETCH_TIMEOUT = 30
+#: Network timeout for remote registry fetches (seconds): the index
+#: fetch and every tarball download. Short enough that a dead host fails
+#: fast instead of hanging scripts and tests; ``urlopen``'s timeout
+#: covers both connect and read. (Alpha 24: was 30s -- too long for an
+#: unreachable host and for hermetic test fixtures.)
+_FETCH_TIMEOUT = 10
 
 
 @dataclass
@@ -189,18 +199,48 @@ def _read_local_index(reg):
 
 
 def _read_remote_index(reg):
+    # urllib follows GET redirects by default; a redirect to something
+    # that is not a JSON index still fails below with a clear message.
     try:
         with urllib.request.urlopen(reg.index_url,
                                     timeout=_FETCH_TIMEOUT) as resp:
             raw = resp.read().decode('utf8')
     except Exception as e:
         raise PackageError(
-            f'could not fetch registry index from {reg.index_url}: {e}')
+            _network_error('registry index', reg.index_url, e))
     try:
         return json.loads(raw)
     except ValueError as e:
         raise PackageError(
             f'registry index at {reg.index_url} is not valid JSON: {e}')
+
+
+def _network_error(what, url, e):
+    """Plain-English one-liner for a failed network fetch.
+
+    *what* names the artifact ('registry index', 'tarball for "x"
+    1.0.0'); *url* is the attempted URL. Distinguishes the common
+    failure modes -- DNS failure, connection refused, timeout, HTTP
+    error status -- instead of surfacing urllib's raw exception text.
+    """
+    host = urllib.parse.urlparse(url).hostname or url
+    if isinstance(e, urllib.error.HTTPError):
+        reason = f' {e.reason}' if e.reason else ''
+        return (f'could not fetch {what} from {url}: the server replied '
+                f'with HTTP {e.code}{reason}')
+    cause = e.reason if isinstance(e, urllib.error.URLError) else e
+    if isinstance(cause, socket.gaierror):
+        return (f'could not fetch {what} from {url}: could not resolve '
+                f'"{host}" (DNS failure) -- check the registry address')
+    if isinstance(cause, ConnectionRefusedError):
+        return (f'could not fetch {what} from {url}: connection refused '
+                f'-- is anything serving the registry at {host}?')
+    if isinstance(cause, TimeoutError):
+        # socket.timeout is an alias of TimeoutError since Python 3.10.
+        return (f'could not fetch {what} from {url}: timed out after '
+                f'{_FETCH_TIMEOUT} seconds -- the registry may be down '
+                'or unreachable')
+    return f'could not fetch {what} from {url}: {e}'
 
 
 def fetch_index(reg):
@@ -273,8 +313,13 @@ def _tarball_url(reg, entry_url):
     return 'file://' + resolved.as_posix()
 
 
-def _download(url, dest):
-    """Fetch *url* (http(s) or file) to *dest*. Network only here."""
+def _download(url, dest, what='file'):
+    """Fetch *url* (http(s) or file) to *dest*. Network only here.
+
+    The file:// branch is a plain local copy -- it never goes through
+    the network stack, so it never needs the fetch timeout. *what*
+    names the artifact for error messages.
+    """
     if url.startswith('file://'):
         src = Path(urllib.parse.unquote(urllib.parse.urlparse(url).path))
         if not src.is_file():
@@ -288,7 +333,7 @@ def _download(url, dest):
     except PackageError:
         raise
     except Exception as e:
-        raise PackageError(f'could not download {url}: {e}')
+        raise PackageError(_network_error(what, url, e))
 
 
 def _download_and_verify(reg, name, version, entry):
@@ -300,7 +345,7 @@ def _download_and_verify(reg, name, version, entry):
     tmp = Path(tempfile.mkdtemp(prefix='niko-reg-'))
     tgz = tmp / f'{name}-{version}.tar.gz'
     try:
-        _download(url, tgz)
+        _download(url, tgz, f'tarball for "{name}" {version}')
         digest = hashlib.sha256(tgz.read_bytes()).hexdigest()
         if digest != entry['sha256'].strip().lower():
             raise PackageError(
@@ -412,6 +457,11 @@ def install_from_registry(name, range_spec='*', *, cache_root=None,
 
     entry = _entry_for(index, name, best)
     tgz, tmp = _download_and_verify(reg, name, best, entry)
+    # No partial installs: the cache directory `dest` is only touched
+    # AFTER the tarball is downloaded AND its sha256 verified AND its
+    # manifest/entry checks pass -- a failed download, a hash mismatch,
+    # or a bad tarball can never leave a half-installed package behind
+    # (the temp dir is always removed; `dest` is replaced only here).
     try:
         stage = tmp / 'stage'
         stage.mkdir()
@@ -675,5 +725,68 @@ def update_package(name, *, cwd=None, cache_root=None):
                                    force=True, registry=reg_spec)
     write_package_pin(lock_dir, name, result.manifest.version,
                       f'registry:{reg_spec}', range_spec)
+    # Alpha 24: re-resolve the closure beneath the updated package and
+    # re-pin its subtree -- the new version's [dependencies] may ask for
+    # different ranges than the old one did. Same resolution rule as
+    # `niko2 lock` (see packages._transitive_closure_pins); pins outside
+    # this subtree are untouched, and stale entries are left for the next
+    # `niko2 lock` to drop.
+    pin_closure_under(lock_dir, name, cache_root=cache_root)
     return UpdateResult(name, old_version, result.manifest.version,
                         result.path, changed=True)
+
+
+# ---------------------------------------------------------------------------
+# Locked reinstall: `niko2 get` on a fresh cache (Alpha 24)
+# ---------------------------------------------------------------------------
+
+def ensure_locked_closure_installed(lock_dir, skip=(), cache_root=None):
+    """Install lockfile-pinned package versions missing from the cache.
+
+    ``niko2 get <name>`` installs the top-level package plus
+    range-satisfying dependency versions, but on a fresh machine the
+    *exact* transitive versions pinned by ``niko2 lock`` are missing --
+    the installer may even have picked a *newer* satisfying version
+    than the pin. This walks the lockfile's ``"packages"`` table and
+    installs each pinned version that isn't cached yet, exactly (the
+    version string itself is the range), from the registry recorded in
+    the pin's own ``source`` field.
+
+    Only additive: nothing is ever downgraded, replaced, or removed --
+    a version that is already cached (pinned or otherwise) is left
+    alone. A pin whose version is no longer listed by its registry is a
+    clear error. Non-registry pins (local directory / git sources) are
+    skipped -- their installed version is fixed by the source itself,
+    so there is no exact remote version to fetch. *skip* names packages
+    to leave alone (the caller just installed them). Returns the
+    ``[(name, version)]`` pairs actually installed.
+    """
+    lock_path = Path(lock_dir) / 'niko.lock'
+    try:
+        data = json.loads(lock_path.read_text(encoding='utf8')) \
+            if lock_path.is_file() else {}
+    except ValueError as e:
+        raise PackageError(f'cannot read {lock_path}: {e}')
+    pkgs = data.get('packages')
+    if not isinstance(pkgs, dict):
+        return []
+    installed = []
+    for pname, entry in sorted(pkgs.items()):
+        if pname in skip or not isinstance(entry, dict):
+            continue
+        version = entry.get('version')
+        source = entry.get('source') or ''
+        if not version:
+            continue
+        if cache_dir_for(pname, version, cache_root).is_dir():
+            continue
+        if not source.startswith('registry:'):
+            # Local/git pins: the source is authoritative for the
+            # version, so a "missing exact version" cannot happen --
+            # nothing to fetch, nothing to do.
+            continue
+        install_from_registry(pname, version, cache_root=cache_root,
+                              force=False,
+                              registry=source[len('registry:'):])
+        installed.append((pname, version))
+    return installed

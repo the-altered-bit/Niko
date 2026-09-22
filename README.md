@@ -114,3 +114,30 @@ per iteration), `niko2 format` prints `use "a.niko"` without doubled
 quotes, and `use` inside a function is now a checker error (`'use' is
 only allowed at the top of a file, not inside a function`) instead of
 a silent no-op.
+
+## Niko 2 Alpha 24 — registry hardening
+
+Registries over HTTP(S) now work end to end: point `NIKO_REGISTRY` at an
+index URL and `niko2 get <name>` fetches index + tarballs over HTTP
+(10-second timeout, plain-English errors for HTTP status / DNS failure /
+connection refused / timeout; sha256 verified before the cache is
+touched). `niko2 lock` pins the *full* transitive dependency closure
+(`{version, source, range}` per package — `range` is the parent package's
+requested range), and after every registry `get` the CLI installs any
+lockfile-pinned versions missing from the cache, exactly as pinned
+(`✓ installed locked dependencies: …`), so a fresh machine reproduces the
+author's exact tree. `niko2 get --update <name>` re-resolves and re-pins
+the updated package's subtree. Two live requirements with no common
+version are a hard, actionable error. `niko2 publish` to a remote
+registry is still refused (no auth story yet — publish to a local dir and
+sync it to any static file host; a registry is just `index.json` +
+`tarballs/`).
+
+```bash
+export NIKO_REGISTRY=http://127.0.0.1:8471/index.json
+python -m niko2 get greetapp     # over HTTP
+python -m niko2 lock .           # pins greetapp AND its transitive deps
+```
+
+See `examples/registry-http/` for a worked publish → serve → get → lock →
+run demo, and `RELEASE_NOTES_ALPHA24.md` / `ALPHA24_DESIGN.md` for details.

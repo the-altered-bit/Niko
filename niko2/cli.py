@@ -210,8 +210,19 @@ def main():
                 lock_dir=find_lock_dir('.') or Path('.').resolve()
                 write_package_pin(lock_dir, m.name, m.version,
                                   f'registry:{reg.spec}', range_spec)
+                # Alpha 24: locked reinstall -- the lockfile may pin exact
+                # transitive versions (written by `niko2 lock` on the
+                # machine that resolved them); make sure those exact
+                # versions are installed, not just whatever satisfying
+                # version the installer happened to pick. Additive only.
+                from .registry import ensure_locked_closure_installed
+                backfilled=ensure_locked_closure_installed(
+                    lock_dir, skip={m.name})
             except PackageError as e:
                 print(f'Niko error: {e}'); return 1
+            if backfilled:
+                print('✓ installed locked dependencies: '+
+                      ', '.join(f'{n} {v}' for n,v in backfilled))
             if result.fresh:
                 print(f'✓ installed {m.name} {m.version} → {result.path}')
             else:
