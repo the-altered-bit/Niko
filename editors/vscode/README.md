@@ -11,7 +11,9 @@ Niko programming language. Current through Niko 2.0 Alpha 25.
 - **Language server** (`niko2 lsp`, stdio): squiggles for parse and type
   errors as you type, completion for keywords/builtins/your names, hover
   docs and inferred types, go-to-definition (follows `import`ed modules
-  and `pkg:` packages, even cross-file), format-document, and
+  and `pkg:` packages, even cross-file), format-document, **rename
+  refactoring** (scope-aware, incl. cross-file export renames across
+  `import`/`use` graphs), and
   module-aware diagnostics across `import`/`use` graphs
 - **Debugging** (`niko2 debug`, DAP): line breakpoints — including
   **conditional** breakpoints — step over / in / out, call stack, locals

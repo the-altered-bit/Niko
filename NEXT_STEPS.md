@@ -477,6 +477,37 @@ match cases in `tests/test_formatter.py`.
   50-deep nesting, key order, stringify-of-function errors,
   determinism). Full suite green. See `RELEASE_NOTES_ALPHA31.md` /
   `ALPHA31_DESIGN.md`.
+- **Alpha 32 is complete**: LSP rename refactoring —
+  `textDocument/prepareRename` + `textDocument/rename` in `niko2/lsp.py`
+  (advertised `renameProvider: {prepareProvider: true}`), the last big
+  missing editor operation. Locals, parameters, loop variables,
+  `ask … into` names and match-pattern bindings rename every in-scope
+  reference (nested closures included); shadowing honored (inner renames
+  only inner-bound refs). Top-level `set`/`to` renames extend cross-file:
+  every `import "x.niko" as alias` file gets its `alias.name` occurrences
+  renamed (own alias spelling kept), every `use "x.niko"` file gets
+  bare-name refs renamed; importer discovery = open documents first
+  (unsaved buffers included) then a bounded read-only walk (≤500 `.niko`
+  files, hidden/build dirs skipped) of the project trees; bundled stdlib
+  + package cache are in-file only. Never renamed: builtins, keywords,
+  string contents, comments, import/use path strings, record keys and
+  fields. Import-alias rename is in-file only (module file untouched);
+  bare `use`-provided names renamed from the defining file only.
+  New-name validation via LSP `InvalidParams` (legal name, not keyword,
+  not builtin per `BUILTIN_NAMES`, no scope collision, no capture clash);
+  `prepareRename` → range or null, never a silent no-op; unsaved buffers
+  work. Mechanically reuses the existing scope machinery
+  (`symbols.find_symbol` identity per occurrence line for shadowing,
+  `modules.resolve_import`/`_search_use_tree` for cross-file truth —
+  same functions go-to-definition uses). Known approximation: match-pattern
+  bindings share `symbols.py`'s first-wins scope recording, so renaming a
+  pattern-bound name with an earlier same-scope binding also renames the
+  earlier binding's refs — documented, not fixed (would alter
+  hover/definition). Deliberately out: extract-function, find-references,
+  rename preview, beyond-project search. Tests: new
+  `tests/test_lsp_rename.py` (28 scripted stdio sessions asserting exact
+  edit ranges/full text). `editors/vscode/README.md` documents rename.
+  Full suite green. See `RELEASE_NOTES_ALPHA32.md` / `ALPHA32_DESIGN.md`.
 - **Alpha 19 is complete**: package registry + version-range solving.
   `niko2/semver.py` (range grammar: `*`, exact, partials, npm-style
   `^`/`~`, comparators, comma AND; `max_satisfying` solver,

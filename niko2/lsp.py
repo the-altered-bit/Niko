@@ -35,10 +35,20 @@ Protocol for a good editing experience in any LSP-capable editor:
   merged in by `use` jumps to the top-level `set`/`to` in the used file;
   the use's path string jumps to the used file itself)
 - `textDocument/formatting` — runs `niko2 format` on the whole document
+- `textDocument/prepareRename` + `textDocument/rename` (Alpha 32) —
+  scope-aware rename refactoring: locals, parameters, loop variables
+  and top-level `set`/`to` (with cross-file `alias.name` propagation to
+  importing files, and bare-name propagation to `use`ing files);
+  import aliases rename in-file only; builtins, keywords, string
+  contents, import path strings and record fields are never renameable
 
 Hover and go-to-definition are line-oriented: Niko 2 AST nodes carry line
 numbers but not columns, so results resolve to the nearest sensible line
-(see `niko2/symbols.py`). Cross-file definition reuses
+(see `niko2/symbols.py`). Rename is column-precise instead: it re-scans
+each involved line's text (with strings and comments masked out) to
+find the exact character ranges, while scope resolution still reuses
+`symbols.find_symbol`, so shadowing behaves exactly like hover and
+go-to-definition. Cross-file definition reuses
 `niko2/modules.py`'s import/use resolution, so `pkg:` imports, relative
 `./` imports inside packages, NIKO_PATH, and the bundled stdlib all work
 exactly as they do at compile time; an import or use that can't be
@@ -61,7 +71,7 @@ from .diagnostics import Diagnostic
 from .ast import Node, ImportStmt, UseStmt, AttrExpr, NameExpr, SetStmt, FunctionDef
 from . import packages as _packages
 from .modules import (resolve_import, resolve_use, ImportErrorNiko,
-                      build_module_graph, check_units,
+                      build_module_graph, check_units, stdlib_dir,
                       _unit_exports as _module_unit_exports)
 
 VERSION = '2.0.0-alpha.7'
@@ -350,6 +360,192 @@ def _module_hover_text(node, lines):
     if doc:
         body += '\n\n' + doc
     return body
+
+
+# ---------------------------------------------------------------------------
+# Alpha 32: rename refactoring -- shared helpers.
+#
+# RENAME-SCOPE RULES (also documented in ALPHA32_DESIGN.md):
+# 1. Renaming a local or parameter renames every reference in its scope,
+#    including nested closures that capture it. Shadowing is honored: an
+#    inner binding renames only the references bound to the inner one.
+# 2. Renaming a top-level `set`/`to` renames its references in the file.
+#    When the name is exported, the rename extends cross-file: every
+#    file that does `import "x.niko" as alias` gets its `alias.name`
+#    occurrences renamed (each file keeps its own alias spelling), and
+#    every file that merges the name in with `use` gets its bare-name
+#    references renamed. Importer discovery is read-only and bounded
+#    (open documents first, then a capped walk of the project trees).
+# 3. NEVER renamed: builtins, keywords, string contents, comments, the
+#    quoted path in `import "..."`/`use "..."`, record keys (`{k: v}`)
+#    and record fields (`rec.field`). Cursor on the attribute side of
+#    `alias.name` (live import alias) renames the module's export (rule
+#    2); cursor on any other attribute renames nothing. Renaming an
+#    import alias renames the alias binding in-file only -- the module
+#    file is never touched.
+# 4. The new name must be a legal identifier, not a keyword, not a
+#    builtin, and must not collide with a visible binding (same-scope
+#    redefinition or a nested binding that would capture references).
+#
+# MECHANICS: scope resolution reuses `symbols.find_symbol` (the same
+# line-oriented scope info hover/definition use), so shadowing behaves
+# identically everywhere. Column precision comes from re-scanning each
+# line's text with strings/comments masked out (`_mask_line`), because
+# AST nodes carry lines but not columns.
+def _mask_line(line):
+    """`line` with string literals and comments blanked (length kept).
+
+    Lets the rename scanner work on code only: a name inside a string
+    or a comment is never a renameable occurrence. Handles both quote
+    styles and backslash escapes; Niko 2 strings are single-line, so
+    this is safe per line.
+    """
+    out = list(line)
+    i, n = 0, len(line)
+    while i < n:
+        c = line[i]
+        if c == '#':
+            for j in range(i, n):
+                out[j] = ' '
+            break
+        if c == '"' or c == "'":
+            out[i] = ' '
+            i += 1
+            while i < n and line[i] != c:
+                if line[i] == '\\' and i + 1 < n:
+                    out[i] = ' '
+                    out[i + 1] = ' '
+                    i += 2
+                    continue
+                out[i] = ' '
+                i += 1
+            if i < n:
+                out[i] = ' '
+                i += 1
+        else:
+            i += 1
+    return ''.join(out)
+
+
+def _split_attribute(masked, m):
+    """(object-word, attr-word) when WORD match `m` is the attribute
+    side of a dotted access (`obj.attr`, whitespace around the dot is
+    allowed by the parser); None otherwise."""
+    j = m.start() - 1
+    while j >= 0 and masked[j] in ' \t':
+        j -= 1
+    if j < 0 or masked[j] != '.':
+        return None
+    om = re.search(r'[A-Za-z_][A-Za-z0-9_]*$', masked[:j])
+    if om is None:
+        return None
+    return om.group(0), m.group(0)
+
+
+def _scan_word_occurrences(text, word):
+    """Yield (line0, start, end, kind) for each code occurrence of `word`.
+
+    Strings and comments are masked first, so occurrences inside them
+    never surface. kind is 'plain' (a real name occurrence), 'attr'
+    (the attribute side of `obj.word`), or 'key' (a record key `word:`
+    inside braces -- record keys are not bindings and are never
+    renamed). Brace depth is carried across lines so multi-line record
+    literals classify correctly.
+    """
+    depth = 0
+    for i, raw in enumerate(text.splitlines()):
+        masked = _mask_line(raw)
+        for m in WORD.finditer(masked):
+            if m.group(0) != word:
+                continue
+            if _split_attribute(masked, m) is not None:
+                yield i, m.start(), m.end(), 'attr'
+                continue
+            d = (depth + masked[:m.start()].count('{')
+                 - masked[:m.start()].count('}'))
+            k = m.end()
+            while k < len(masked) and masked[k] in ' \t':
+                k += 1
+            if d > 0 and k < len(masked) and masked[k] == ':':
+                yield i, m.start(), m.end(), 'key'
+                continue
+            yield i, m.start(), m.end(), 'plain'
+        depth += masked.count('{') - masked.count('}')
+
+
+def _find_scope(root, name, line):
+    """(innermost Scope, Symbol) for `name` visible at 1-based `line`;
+    (None, None) when no scope defines it. Same walk as
+    `symbols.find_symbol`, which returns only the Symbol."""
+    best = (None, None)
+
+    def visit(scope):
+        nonlocal best
+        if scope.start <= line <= scope.end and name in scope.symbols:
+            best = (scope, scope.symbols[name])
+        for ch in scope.children:
+            visit(ch)
+
+    visit(root)
+    return best
+
+
+def _is_top_level_def(tree, name):
+    """True when `name` is a top-level `set`/`to` -- i.e. an export."""
+    return any(isinstance(n, (SetStmt, FunctionDef)) and n.name == name
+               for n in tree.body)
+
+
+_IDENT_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+class _RenameRefused(Exception):
+    """A rename that cannot be performed; the message is sent back as
+    the LSP `InvalidParams` (-32602) error, in plain English."""
+
+
+_PROJECT_MARKERS = ('niko.toml', 'niko.lock', '.git')
+
+
+def _project_root(start_dir):
+    """Nearest ancestor of `start_dir` (inclusive) holding a project
+    marker (`niko.toml`, `niko.lock`, `.git`); `start_dir` itself when
+    there is none."""
+    cur = Path(start_dir).resolve()
+    while True:
+        if any((cur / m).exists() for m in _PROJECT_MARKERS):
+            return str(cur)
+        parent = cur.parent
+        if parent == cur:
+            return str(cur)
+        cur = parent
+
+
+_WALK_SKIP_DIRS = {'__pycache__', 'node_modules', '.venv', 'venv', 'target',
+                   'build', 'dist', '.git', '.hg', '.svn', '.niko',
+                   '.idea', '.vscode'}
+
+
+def _walk_niko_files(roots, limit=500):
+    """Resolved `.niko` paths under `roots` (read-only walk).
+
+    Skips hidden directories and common build/dependency dirs; capped
+    at `limit` files so a huge tree cannot stall a rename request.
+    """
+    out = []
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames
+                           if not d.startswith('.')
+                           and d not in _WALK_SKIP_DIRS]
+            for fn in filenames:
+                if fn.endswith('.niko'):
+                    out.append(str(Path(dirpath, fn).resolve()))
+                    if len(out) >= limit:
+                        return out
+    return out
 
 
 def _diagnostic(exc):
@@ -721,6 +917,7 @@ class Server:
                     'hoverProvider': True,
                     'definitionProvider': True,
                     'documentFormattingProvider': True,
+                    'renameProvider': {'prepareProvider': True},
                 }, 'serverInfo': {'name': 'niko2-lsp', 'version': VERSION}})
             elif method == 'initialized':
                 pass
@@ -746,6 +943,10 @@ class Server:
                 respond(self._hover(params))
             elif method == 'textDocument/definition':
                 respond(self._definition(params))
+            elif method == 'textDocument/prepareRename':
+                respond(self._prepare_rename(params))
+            elif method == 'textDocument/rename':
+                respond(self._rename(params))
             elif method == 'textDocument/formatting':
                 respond(self._format(params))
             elif mid is not None and method not in ('exit',):
@@ -753,6 +954,10 @@ class Server:
                            'error': {'code': -32601, 'message': f'method not found: {method}'}})
             if method == 'exit':
                 return False
+        except _RenameRefused as e:
+            if mid is not None:
+                self.send({'jsonrpc': '2.0', 'id': mid,
+                           'error': {'code': -32602, 'message': str(e)}})
         except Exception:
             if mid is not None:
                 self.send({'jsonrpc': '2.0', 'id': mid,
@@ -1024,6 +1229,419 @@ class Server:
             return None
         return {'contents': {'kind': 'markdown',
                              'value': _module_hover_text(node, src_lines)}}
+
+    # -- Alpha 32: rename refactoring ---------------------------------
+
+    def _parse_quiet(self, text):
+        # Broad catch: this scans arbitrary project files during
+        # importer discovery, and the parser can raise non-ParseError
+        # on some malformed inputs (e.g. multi-line record literals).
+        # Such files are simply skipped as importers; the invoking
+        # file still goes through self._tree (same as hover/definition).
+        try:
+            return parse(text)
+        except Exception:
+            return None
+
+    def _import_targets(self, importer_path, tree):
+        """[(alias, resolved path str)] for the file's imports;
+        unresolvable imports are skipped (their diagnostics say why)."""
+        out = []
+        for n in _iter_nodes(tree):
+            if isinstance(n, ImportStmt):
+                t = _resolve_import_target(importer_path, n.path, n.line)
+                if t is not None:
+                    out.append((n.alias, str(t)))
+        return out
+
+    def _use_targets(self, importer_path, tree):
+        """[resolved path str] for the file's `use`s; unresolvable and
+        builtin-name uses are skipped."""
+        out = []
+        for n in _iter_nodes(tree):
+            if isinstance(n, UseStmt):
+                t = _resolve_use_target(importer_path, n.module, n.line)
+                if t is not None:
+                    out.append(str(t))
+        return out
+
+    def _load_export_binding(self, deffile, name):
+        """Binding dict for the top-level `set`/`to` `name` in `deffile`.
+
+        Prefers the open buffer over disk (unsaved edits win); None
+        when the file can't be read/parsed or doesn't define the name.
+        """
+        text = None
+        duri = None
+        for ouri, otext in self.docs.items():
+            op = _uri_to_path(ouri)
+            if op is not None and str(Path(op).resolve()) == deffile:
+                text, duri = otext, ouri
+                break
+        if text is None:
+            try:
+                text = Path(deffile).read_text(encoding='utf8')
+            except OSError:
+                return None
+        tree = self._parse_quiet(text)
+        if tree is None or not _is_top_level_def(tree, name):
+            return None
+        root = collect_symbols(tree)
+        node = next(n for n in tree.body
+                    if isinstance(n, (SetStmt, FunctionDef))
+                    and n.name == name)
+        sym = find_symbol(root, name, node.line)
+        if sym is None:
+            return None
+        return {'kind': 'export', 'word': name, 'file': deffile,
+                'uri': duri, 'text': text, 'root': root, 'sym': sym,
+                'scope': root}
+
+    def _locate_rename_target(self, uri, line0, char):
+        """(target, word, span-or-reason) for a rename at a position.
+
+        Returns (target, word, span) with span=(line0, start, end) when
+        the cursor is on something renameable, else (None, word_or_None,
+        reason). Uses the open buffer (unsaved edits included) through
+        `self._tree`, exactly like hover/definition.
+        """
+        text = self.docs.get(uri)
+        if text is None:
+            return None, None, 'that file is not open in the editor'
+        lines = text.splitlines()
+        if line0 >= len(lines):
+            return None, None, 'there is nothing to rename at that position'
+        masked = _mask_line(lines[line0])
+        m = next((mm for mm in WORD.finditer(masked)
+                  if mm.start() <= char <= mm.end()), None)
+        if m is None:
+            return None, None, 'there is nothing to rename at that position'
+        word = m.group(0)
+        span = (line0, m.start(), m.end())
+        if word in KEYWORDS:
+            return (None, word,
+                    f'"{word}" is a keyword, and keywords cannot be renamed')
+        if word in BUILTIN_NAMES:
+            return (None, word,
+                    f'"{word}" is a builtin, and builtins cannot be renamed')
+        tree = self._tree(uri)
+        if tree is None:
+            return (None, word,
+                    'the file has errors, so rename is unavailable '
+                    'until they are fixed')
+        root = collect_symbols(tree)
+        line1 = line0 + 1
+        attr = _split_attribute(masked, m)
+        if attr is not None:
+            return self._locate_attribute_target(uri, tree, root, line1,
+                                                 attr[0], attr[1], span)
+        sym = find_symbol(root, word, line1)
+        if sym is None:
+            importer = _uri_to_path(uri)
+            if importer is not None:
+                found = _search_use_tree(importer, tree, word, set())
+                if found is not None:
+                    return (None, word,
+                            f'"{word}" comes from a file merged in with '
+                            '`use`; renaming across `use` from the using '
+                            'file is not supported yet -- open the '
+                            'defining file to rename it there')
+            return (None, word,
+                    f'"{word}" is not defined here, so there is nothing '
+                    'to rename')
+        scope, _ = _find_scope(root, word, line1)
+        fpath = _uri_to_path(uri)
+        fpath = str(Path(fpath).resolve()) if fpath else None
+        base = {'word': word, 'file': fpath, 'uri': uri, 'text': text,
+                'root': root, 'sym': sym, 'scope': scope}
+        if sym.kind == 'module':
+            # An import alias: renameable in this file only. The module
+            # file itself is never touched.
+            return dict(base, kind='alias'), word, span
+        if scope is root and _is_top_level_def(tree, word):
+            # A top-level set/to: an export. References in this file
+            # rename with it; importing files are handled cross-file by
+            # _rename_export.
+            return dict(base, kind='export'), word, span
+        return dict(base, kind='local'), word, span
+
+    def _locate_attribute_target(self, uri, tree, root, line1, objword,
+                                 attrword, span):
+        """Target for a cursor on the attribute side of `obj.attr`.
+
+        Only `alias.name` where `alias` is a live import alias resolves
+        to a renameable binding (the module's export); record fields
+        and shadowed aliases are not renameable.
+        """
+        imports = {}
+        for n in _iter_nodes(tree):
+            if isinstance(n, ImportStmt):
+                imports[n.alias] = (n.path, n.line)
+        if objword not in imports:
+            return (None, attrword,
+                    f'"{attrword}" is a field, not a renameable name')
+        osym = find_symbol(root, objword, line1)
+        if osym is None or osym.kind != 'module':
+            return (None, attrword,
+                    f'"{objword}" is shadowed here, so '
+                    f'"{objword}.{attrword}" does not refer to the '
+                    'module import')
+        importer = _uri_to_path(uri)
+        raw_path, iline = imports[objword]
+        tgt = (_resolve_import_target(importer, raw_path, iline)
+               if importer else None)
+        if tgt is None:
+            return None, attrword, f'the module "{raw_path}" cannot be found'
+        binding = self._load_export_binding(str(tgt), attrword)
+        if binding is None:
+            return None, attrword, \
+                f'the module does not export "{attrword}"'
+        return binding, attrword, span
+
+    def _prepare_rename(self, params):
+        uri = params['textDocument']['uri']
+        pos = params.get('position') or {}
+        target, word, span = self._locate_rename_target(
+            uri, pos.get('line', 0), pos.get('character', 0))
+        if target is None or word is None:
+            return None
+        line0, s, e = span
+        return {'range': {'start': {'line': line0, 'character': s},
+                          'end': {'line': line0, 'character': e}},
+                'placeholder': word}
+
+    @staticmethod
+    def _text_edit(span, new_name):
+        line0, s, e = span
+        return {'range': {'start': {'line': line0, 'character': s},
+                          'end': {'line': line0, 'character': e}},
+                'newText': new_name}
+
+    def _plain_edits(self, text, root, sym):
+        """[(line0, start, end)] for every plain code occurrence of
+        `sym.name` that resolves to `sym`.
+
+        Attribute sides (`obj.name`) and record keys (`name:` in braces)
+        are never plain occurrences; shadowing falls out of the
+        scope-aware `find_symbol` check, so an inner binding's
+        references never leak into an outer rename and vice versa.
+        """
+        edits = []
+        for line0, s, e, kind in _scan_word_occurrences(text, sym.name):
+            if kind != 'plain':
+                continue
+            if find_symbol(root, sym.name, line0 + 1) is not sym:
+                continue
+            edits.append((line0, s, e))
+        return edits
+
+    def _check_collision(self, root, scope, new_name, lines1):
+        """Refuse the rename when `new_name` would collide with a
+        visible binding; raises _RenameRefused (plain English).
+
+        Two checks: (1) `new_name` must not already be bound in the
+        target's own scope; (2) at every renamed line, the innermost
+        scope that already defines `new_name` must be the target's
+        scope itself (or none) -- otherwise a nested binding would
+        capture the renamed references or references would resolve
+        somewhere new.
+        """
+        if new_name in scope.symbols:
+            raise _RenameRefused(
+                f'"{new_name}" is already defined in that scope')
+        for l1 in lines1:
+            s, _ = _find_scope(root, new_name, l1)
+            if s is not None and s is not scope:
+                raise _RenameRefused(
+                    f'"{new_name}" would clash with another "{new_name}" '
+                    'visible where it is used')
+
+    def _is_managed(self, deffile):
+        """True when `deffile` is a managed artifact (the bundled
+        stdlib or the local package cache): rename stays in-file there
+        and never reaches across files."""
+        try:
+            sd = str(Path(stdlib_dir()).resolve())
+            if deffile == sd or deffile.startswith(sd + os.sep):
+                return True
+        except Exception:
+            pass
+        try:
+            cr = str(Path(_packages.default_cache_root()).resolve())
+            if deffile == cr or deffile.startswith(cr + os.sep):
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _find_importers(self, deffile, entry_path):
+        """[(kind, path, alias, uri_or_None, text, tree)] for every file
+        that imports (`kind='import'`, with its alias) or `use`s
+        (`kind='use'`) the definition file.
+
+        Open documents come first (unsaved buffers included); then a
+        bounded read-only walk of the project trees of the definition
+        file and the entry file. Files that fail to parse are skipped
+        -- their diagnostics already say why.
+        """
+        found = []
+        seen = {deffile}
+        for ouri, otext in self.docs.items():
+            op = _uri_to_path(ouri)
+            if op is None:
+                continue
+            rp = str(Path(op).resolve())
+            if rp in seen:
+                continue
+            seen.add(rp)
+            tree = self._parse_quiet(otext)
+            if tree is None:
+                continue
+            for alias, t in self._import_targets(rp, tree):
+                if t == deffile:
+                    found.append(('import', rp, alias, ouri, otext, tree))
+            for t in self._use_targets(rp, tree):
+                if t == deffile:
+                    found.append(('use', rp, None, ouri, otext, tree))
+        roots = {_project_root(str(Path(deffile).parent))}
+        if entry_path:
+            roots.add(_project_root(str(Path(entry_path).parent)))
+        for path in _walk_niko_files(sorted(roots)):
+            if path in seen:
+                continue
+            seen.add(path)
+            try:
+                otext = Path(path).read_text(encoding='utf8')
+            except OSError:
+                continue
+            tree = self._parse_quiet(otext)
+            if tree is None:
+                continue
+            for alias, t in self._import_targets(path, tree):
+                if t == deffile:
+                    found.append(('import', path, alias, None, otext, tree))
+            for t in self._use_targets(path, tree):
+                if t == deffile:
+                    found.append(('use', path, None, None, otext, tree))
+        return found
+
+    def _importer_attr_edits(self, itext, itree, ipath, iroot, alias,
+                             deffile, word):
+        """[(line0, start, end)] of `word` in `alias.word` occurrences
+        in an importing file, where `alias` really is the import alias
+        at that line (shadowed lines are skipped, mirroring the
+        alias-attribute lint)."""
+        targets = dict(self._import_targets(ipath, itree))
+        if targets.get(alias) != deffile:
+            return []
+        pat = re.compile(r'\b' + re.escape(alias) + r'\s*\.\s*('
+                         + re.escape(word) + r')\b')
+        edits = []
+        for i, raw in enumerate(itext.splitlines()):
+            masked = _mask_line(raw)
+            asym = find_symbol(iroot, alias, i + 1)
+            if asym is None or asym.kind != 'module':
+                continue
+            for m in pat.finditer(masked):
+                edits.append((i, m.start(1), m.end(1)))
+        return edits
+
+    def _use_importer_edits(self, itext, ipath, itree, iroot, word,
+                            deffile):
+        """[(line0, start, end)] of bare `word` occurrences in a file
+        that merges the definition file in with `use`, resolving to the
+        export.
+
+        The entry's own definitions (and any shadowing loop/pattern
+        bindings) win -- those occurrences are skipped; the use tree is
+        consulted exactly as go-to-definition does, so later-`use`-wins
+        and transitivity match compile time.
+        """
+        edits = []
+        for line0, s, e, kind in _scan_word_occurrences(itext, word):
+            if kind != 'plain':
+                continue
+            if find_symbol(iroot, word, line0 + 1) is not None:
+                continue
+            found = _search_use_tree(ipath, itree, word, set())
+            if found is None:
+                continue
+            t, node = found
+            if str(t) != deffile or node.name != word:
+                continue
+            edits.append((line0, s, e))
+        return edits
+
+    def _rename_export(self, uri, target, word, new_name):
+        """WorkspaceEdit for renaming an exported top-level `set`/`to`.
+
+        The definition file gets its definition plus every in-file
+        reference; every importing file gets its `alias.<name>`
+        occurrences (each file keeps its own alias spelling); every
+        file that merges the name in with `use` gets its bare-name
+        references.
+        """
+        deffile = target['file']
+        edits = self._plain_edits(target['text'], target['root'],
+                                  target['sym'])
+        self._check_collision(target['root'], target['scope'], new_name,
+                              [target['sym'].line]
+                              + [e[0] + 1 for e in edits])
+        duri = target['uri'] or _path_to_uri(deffile)
+        changes = {duri: [self._text_edit(e, new_name) for e in edits]}
+        if not self._is_managed(deffile):
+            entry_path = _uri_to_path(uri)
+            for imp_kind, ipath, alias, iuri, itext, itree in \
+                    self._find_importers(deffile, entry_path):
+                iuri = iuri or _path_to_uri(ipath)
+                iroot = collect_symbols(itree)
+                if imp_kind == 'import':
+                    iedits = self._importer_attr_edits(
+                        itext, itree, ipath, iroot, alias, deffile, word)
+                else:
+                    iedits = self._use_importer_edits(
+                        itext, ipath, itree, iroot, word, deffile)
+                if iedits:
+                    changes.setdefault(iuri, []).extend(
+                        self._text_edit(e, new_name) for e in iedits)
+        for uri_edits in changes.values():
+            uri_edits.sort(key=lambda e: (e['range']['start']['line'],
+                                          e['range']['start']['character']))
+        return {'changes': changes}
+
+    def _rename(self, params):
+        uri = params['textDocument']['uri']
+        pos = params.get('position') or {}
+        new_name = params.get('newName', '')
+        if not new_name or not _IDENT_RE.match(new_name):
+            raise _RenameRefused(
+                f'"{new_name}" is not a valid Niko name: use letters, '
+                'digits and underscores, not starting with a digit')
+        if new_name in KEYWORDS:
+            raise _RenameRefused(
+                f'"{new_name}" is a keyword and cannot be used as a name')
+        if new_name in BUILTIN_NAMES:
+            raise _RenameRefused(
+                f'"{new_name}" is a builtin and cannot be used as a name')
+        target, word, detail = self._locate_rename_target(
+            uri, pos.get('line', 0), pos.get('character', 0))
+        if target is None:
+            # Never a silent no-op: a non-renameable cursor is an error.
+            raise _RenameRefused(detail)
+        if new_name == word:
+            return {'changes': {}}
+        if target['kind'] in ('local', 'alias'):
+            edits = self._plain_edits(target['text'], target['root'],
+                                      target['sym'])
+            self._check_collision(target['root'], target['scope'],
+                                  new_name,
+                                  [target['sym'].line]
+                                  + [e[0] + 1 for e in edits])
+            tedits = [self._text_edit(e, new_name) for e in edits]
+            tedits.sort(key=lambda e: (e['range']['start']['line'],
+                                       e['range']['start']['character']))
+            return {'changes': {uri: tedits}}
+        return self._rename_export(uri, target, word, new_name)
 
     def _format(self, params):
         uri = params['textDocument']['uri']
