@@ -29,7 +29,7 @@ sys.path.insert(0, str(project_root))
 from niko2.modules import stdlib_dir  # noqa: E402
 
 STDLIB_DIR = stdlib_dir()
-MODULES = ['text', 'math', 'lists', 'records']
+MODULES = ['text', 'math', 'lists', 'records', 'json']
 
 
 # ---------------------------------------------------------------------------

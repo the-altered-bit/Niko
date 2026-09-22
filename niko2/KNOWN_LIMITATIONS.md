@@ -430,3 +430,64 @@ Browser differences from `niko2 run`, all deliberate:
 - The in-browser end-to-end test (`e2e.mjs`) could not run on the
   build machine (Pyodide CDN unreachable from it); one networked run
   is still owed before the page is called proven.
+
+## Alpha 31 json notes
+
+`niko2/stdlib/json.niko` (pure Niko, no backend changes) ships with
+three documented module limitations and two native-backend bugs worked
+around in pure Niko, plus one new WASM backend bug found by testing.
+All are pinned by `tests/test_json.py`.
+
+**Module limitations** (in the module header and `STDLIB.md` too):
+
+- **`\uXXXX` escapes above U+007F are a parse error** naming the
+  position (`\u0041`–`\u007f` decode fine). Raw UTF-8 in JSON strings
+  parses on VM/native; on WASM it fails (backend bug, below).
+- **Numbers with magnitude >= 1e15 are rejected** with
+  `number out of range`: the VM keeps integers exact while WASM and
+  native use f64, so the module rejects uniformly instead of
+  disagreeing.
+- **Integer-valued floats render `1.0` on the VM but `1` on
+  WASM/native** (each backend's own `text()` rule); both are valid
+  JSON for the same value.
+
+**Native backend bugs, worked around in pure Niko** (no backend
+changes; remove the workarounds if the backend is fixed):
+
+- **Native `otherwise if` + short-circuit `and`/`or` returns
+  `nothing` when the first operand doesn't decide.** Workaround: the
+  module splits such branches into nested `if`s instead of
+  `otherwise if` chains.
+- **Native hoists call arguments in `if`/`while` conditions past
+  short-circuit guards.** Workaround: `_char_at` is total (returns
+  `""` past the end, never panics) and call sites never rely on a
+  guard to prevent the call.
+
+**WASM backend bug (new, found by `tests/test_json.py`): `while yes:`
++ string indexing on multibyte text miscompiles.** Minimal repro:
+
+```niko
+to f2 with s: text, cur: map -> text:
+    set out to ""
+    while yes:
+        set c to item_of(cur["pos"], s)
+        if c is "\"":
+            set cur["pos"] to cur["pos"] + 1
+            give back out
+        otherwise:
+            set out to out + c
+            set cur["pos"] to cur["pos"] + 1
+    give back out
+say f2("\"héllo\"", {pos: 2})
+```
+
+VM/native print `héllo`; WASM dies with `Line 4: string index out of
+range` from the host. The same loop with a bounded `while`
+condition, or the same `item_of` calls outside `while yes:`, work on
+WASM; ASCII strings are unaffected everywhere. In `json.niko` this
+surfaces as `json.parse` failing on JSON strings containing raw
+multibyte UTF-8 (`json parse error at character 14: unterminated
+string` for `"héllo wörld"`), while `json.stringify` of multibyte
+text is correct on WASM. `tests/test_json.py` asserts the WASM
+failure explicitly (commented "flip when fixed") so a backend fix
+shows up as a test failure to update, not silent drift.

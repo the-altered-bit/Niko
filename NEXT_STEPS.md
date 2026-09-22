@@ -448,6 +448,35 @@ match cases in `tests/test_formatter.py`.
   `niko2 run` output. `examples/playground/niko2_bundle.js` rebuilt
   from the Alpha 30 tree. Full suite green. See
   `RELEASE_NOTES_ALPHA30.md` / `ALPHA30_DESIGN.md`.
+- **Alpha 31 is complete**: `json` stdlib module (`niko2/stdlib/json.niko`,
+  pure Niko, no new syntax, no new builtins, no backend changes) —
+  `json.parse(text) -> any` (objects → records with last-key-wins,
+  arrays → lists, `true`/`false`/`null` → `yes`/`no`/`nothing`) and
+  `json.stringify(value) -> text` (compact, keys in insertion order),
+  plus 22 `_`-prefixed helpers, all doc-commented (24 doc examples).
+  Parse errors raise `json parse error at character N: <msg>` via
+  `unwrap(error(...))`, native on all backends. Documented
+  limitations: `\uXXXX` above U+007F rejected (use raw UTF-8 on
+  VM/native); numbers with magnitude ≥ 1e15 rejected (`number out of
+  range` — VM keeps ints exact, WASM/native use f64);
+  integer-valued floats render `1.0` (VM) vs `1` (WASM/native).
+  Two Alpha 30-era native bugs worked around in pure Niko (no backend
+  changes): native `otherwise if` + short-circuit `and`/`or`
+  returning `nothing` (branches split into nested `if`s) and native
+  hoisting call args past short-circuit guards (`_char_at` is total,
+  returns `""` past the end). New WASM backend bug found by the
+  tests and documented (not fixed): `while yes:` + `item_of` on
+  multibyte strings miscompiles (host `string index out of range`),
+  so `json.parse` of raw-multibyte JSON strings fails on WASM while
+  VM/native succeed — `tests/test_json.py` asserts the WASM failure
+  explicitly ("flip when fixed"). Tests: `'json'` added to `MODULES`
+  in `tests/test_stdlib2.py` (24 doc examples 3-way + determinism,
+  `STDLIB.md` regenerated); new `tests/test_json.py` (14 malformed
+  inputs asserting exact error positions ×3 backends, `\u` escapes,
+  ≥1e15 rejection, per-backend `1.0` rendering, round-trip battery,
+  50-deep nesting, key order, stringify-of-function errors,
+  determinism). Full suite green. See `RELEASE_NOTES_ALPHA31.md` /
+  `ALPHA31_DESIGN.md`.
 - **Alpha 19 is complete**: package registry + version-range solving.
   `niko2/semver.py` (range grammar: `*`, exact, partials, npm-style
   `^`/`~`, comparators, comma AND; `max_satisfying` solver,

@@ -1,0 +1,538 @@
+# stdlib/json -- JSON parsing and serialization.
+#
+# Import with:
+#   import "stdlib/json.niko" as json
+#
+# parse turns JSON text into Niko values: objects become records, arrays
+# become lists, and true/false/null become yes/no/nothing. stringify goes
+# the other way, writing compact JSON with record keys in insertion order
+# (the order parse produces).
+#
+# Known limitations:
+# - \uXXXX escapes above U+007F are not supported by parse; they are a
+#   parse error naming the character position. On the VM and native
+#   backends you can write such characters as raw UTF-8 instead (JSON
+#   allows it); on WASM, parsing a JSON string that contains raw
+#   multibyte UTF-8 fails -- a WASM backend bug (`while yes:` loops
+#   miscompile string indexing on multibyte text, see
+#   niko2/KNOWN_LIMITATIONS.md). stringify of multibyte text works on
+#   all three backends.
+# - Numbers with magnitude >= 1e15 are rejected with "number out of
+#   range": beyond that the three backends cannot agree (the VM keeps
+#   integers exact while WASM and native use f64, which would silently
+#   round or fail). Carry bigger integers as text.
+# - Integer-valued floats render as "1.0" on the VM but "1" on WASM and
+#   native (each backend's own text() rule); both are valid JSON for the
+#   same value.
+# - stringify of any other value (for example a function) is an error.
+
+# parse(text) -> any
+# Parse one JSON document. Objects become records (duplicate keys: the
+# last value wins, the first position is kept), arrays become lists,
+# strings become text, numbers become numbers, and true/false/null become
+# yes/no/nothing. Leading and trailing whitespace is allowed; anything
+# else is a parse error naming the 1-based character position, for
+# example "json parse error at character 12: unexpected end of input".
+# example: json.parse("{\"name\": \"Ada\", \"n\": 1.5}") -> {name: "Ada", n: 1.5}
+# example: json.parse("[1, \"two\", true, null]") -> [1, "two", yes, nothing]
+# example: json.parse("{\"a\": 1, \"a\": 2}") -> {a: 2}
+to parse with text: text -> any:
+    set cur to {pos: 1}
+    set value to _parse_value(text, cur)
+    _skip_ws(text, cur)
+    if cur["pos"] is at most length(text):
+        unwrap(error(_err_text(cur["pos"], "unexpected trailing text")))
+    give back value
+
+# stringify(value) -> text
+# Render a Niko value as compact JSON text: records as {"k":v} with keys
+# in insertion order, lists as [v,v], text quoted and escaped, numbers
+# via text(), yes/no/nothing as true/false/null. Any other value (for
+# example a function) is a "json stringify error".
+#
+# Booleans are detected by their text() rendering ("True"/"yes" and
+# "False"/"no") rather than `value is yes`, because Niko `is` is equality:
+# `1 is yes` and `0 is no` are both `yes`, so a bare `is yes` test would
+# stringify the number 1 as `true`. The text check runs first so the
+# *string* "True" is still quoted rather than mistaken for a boolean.
+# example: json.stringify({b: 1, a: [yes, nothing]}) -> {"b":1,"a":[true,null]}
+# example: json.stringify("hi") -> "hi"
+# example: json.stringify(1.5) -> 1.5
+# example: json.stringify(nothing) -> null
+to stringify with value -> text:
+    if value is nothing:
+        give back "null"
+    if value is text(value):
+        give back _stringify_string(value)
+    set t to text(value)
+    if t is "True" or t is "yes":
+        give back "true"
+    if t is "False" or t is "no":
+        give back "false"
+    match value:
+        when []:
+            give back "[]"
+        when [first, ...rest]:
+            give back "[" + _stringify_list(value) + "]"
+        when {}:
+            give back "{" + _stringify_record(value) + "}"
+        otherwise:
+            give back _stringify_number(value)
+
+# _err_text(pos, msg) -> text
+# The full message for a parse failure at 1-based character pos.
+# example: json._err_text(3, "unexpected end of input") -> json parse error at character 3: unexpected end of input
+to _err_text with pos: number, msg: text -> text:
+    give back "json parse error at character " + text(pos) + ": " + msg
+
+# _is_ws(c) -> boolean
+# yes for the four JSON whitespace characters: space, tab, newline and
+# carriage return.
+# example: json._is_ws(" ") -> yes
+# example: json._is_ws("\t") -> yes
+# example: json._is_ws("a") -> no
+to _is_ws with c: text -> boolean:
+    give back c is " " or c is "\t" or c is "\n" or c is "\r"
+
+# _char_at(s, pos) -> text
+# The character at 1-based position pos in s, or "" when pos is past the
+# end. Unlike item_of, it never fails; this lets short-circuit and/or
+# conditions use it safely on every backend. (The native backend
+# evaluates a condition's call arguments before testing the first
+# operand, so a guarded item_of would still panic there.)
+# example: json._char_at("hi", 1) -> h
+# example: json._char_at("hi", 9) is "" -> yes
+to _char_at with s: text, pos: number -> text:
+    if pos is bigger than length(s):
+        give back ""
+    give back item_of(pos, s)
+
+# _is_digit(c) -> boolean
+# yes for a single ASCII digit. Unlike has("0123456789", c), this is no
+# for "" (the empty string counts as "found" for has), so it is safe to
+# use with _char_at at the end of input.
+# example: json._is_digit("5") -> yes
+# example: json._is_digit("") -> no
+# example: json._is_digit("x") -> no
+to _is_digit with c: text -> boolean:
+    if c is "":
+        give back no
+    give back has("0123456789", c)
+
+# _skip_ws(s, cur) -> nothing
+# Advance cur["pos"] past any JSON whitespace.
+# example:
+#   set cur to {pos: 1}
+#   json._skip_ws("  x", cur)
+#   cur["pos"] -> 3
+to _skip_ws with s: text, cur: map -> nothing:
+    while _is_ws(_char_at(s, cur["pos"])):
+        set cur["pos"] to cur["pos"] + 1
+    give back nothing
+
+# _expect_word(s, cur, word) -> nothing
+# Consume the exact word at cur["pos"]; a mismatch or the end of input
+# is a parse error naming the character position.
+# example:
+#   set cur to {pos: 1}
+#   json._expect_word("true!", cur, "true")
+#   cur["pos"] -> 5
+to _expect_word with s: text, cur: map, word: text -> nothing:
+    set i to 1
+    while i is at most length(word):
+        if cur["pos"] is bigger than length(s):
+            unwrap(error(_err_text(cur["pos"], "unexpected end of input")))
+        if item_of(cur["pos"], s) is not item_of(i, word):
+            unwrap(error(_err_text(cur["pos"], "expected \"" + word + "\"")))
+        set cur["pos"] to cur["pos"] + 1
+        add 1 to i
+    give back nothing
+
+# _parse_literal(s, cur) -> any
+# Parse true/false/null at cur["pos"]; the t/f/n dispatch already ran in
+# _parse_value.
+# example: json._parse_literal("true", {pos: 1}) -> yes
+# example: json._parse_literal("null ", {pos: 1}) -> nothing
+to _parse_literal with s: text, cur: map -> any:
+    set c to item_of(cur["pos"], s)
+    if c is "t":
+        _expect_word(s, cur, "true")
+        give back yes
+    otherwise if c is "f":
+        _expect_word(s, cur, "false")
+        give back no
+    otherwise:
+        _expect_word(s, cur, "null")
+        give back nothing
+
+# _parse_value(s, cur) -> any
+# Parse one JSON value at cur["pos"]; leave cur["pos"] just past it.
+# example: json._parse_value("[1, 2]", {pos: 1}) -> [1, 2]
+# example: json._parse_value("{\"x\": null}", {pos: 1}) -> {x: nothing}
+to _parse_value with s: text, cur: map -> any:
+    _skip_ws(s, cur)
+    if cur["pos"] is bigger than length(s):
+        unwrap(error(_err_text(cur["pos"], "unexpected end of input")))
+    set c to item_of(cur["pos"], s)
+    if c is "{":
+        give back _parse_object(s, cur)
+    otherwise if c is "[":
+        give back _parse_array(s, cur)
+    otherwise if c is "\"":
+        give back _parse_string(s, cur)
+    otherwise if c is "t":
+        give back _parse_literal(s, cur)
+    otherwise if c is "f":
+        give back _parse_literal(s, cur)
+    otherwise if c is "n":
+        give back _parse_literal(s, cur)
+    otherwise if c is "-":
+        give back _parse_number(s, cur)
+    otherwise if has("0123456789", c):
+        give back _parse_number(s, cur)
+    otherwise:
+        unwrap(error(_err_text(cur["pos"], "unexpected character \"" + c + "\"")))
+
+# _parse_object(s, cur) -> map
+# Parse a {...} object starting at cur["pos"] (which holds the {).
+# Keys keep first-seen order; a repeated key keeps its position but takes
+# the last value.
+# example: json._parse_object("{\"b\": 1, \"a\": 2}", {pos: 1}) -> {b: 1, a: 2}
+# example: json._parse_object("{}", {pos: 1}) -> {}
+to _parse_object with s: text, cur: map -> map:
+    set cur["pos"] to cur["pos"] + 1
+    set out to {}
+    _skip_ws(s, cur)
+    if _char_at(s, cur["pos"]) is "}":
+        set cur["pos"] to cur["pos"] + 1
+        give back out
+    while yes:
+        _skip_ws(s, cur)
+        if _char_at(s, cur["pos"]) is not "\"":
+            unwrap(error(_err_text(cur["pos"], "expected a \"key\"")))
+        set key to _parse_string(s, cur)
+        _skip_ws(s, cur)
+        if _char_at(s, cur["pos"]) is not ":":
+            unwrap(error(_err_text(cur["pos"], "expected \":\"")))
+        set cur["pos"] to cur["pos"] + 1
+        set out[key] to _parse_value(s, cur)
+        _skip_ws(s, cur)
+        if cur["pos"] is bigger than length(s):
+            unwrap(error(_err_text(cur["pos"], "unterminated object")))
+        set c to item_of(cur["pos"], s)
+        if c is ",":
+            set cur["pos"] to cur["pos"] + 1
+        otherwise if c is "}":
+            set cur["pos"] to cur["pos"] + 1
+            give back out
+        otherwise:
+            unwrap(error(_err_text(cur["pos"], "expected \",\" or \"}\"")))
+
+# _parse_array(s, cur) -> list
+# Parse a [...] array starting at cur["pos"] (which holds the [).
+# example: json._parse_array("[1, \"a\", null]", {pos: 1}) -> [1, "a", nothing]
+# example: json._parse_array("[]", {pos: 1}) -> []
+to _parse_array with s: text, cur: map -> list:
+    set cur["pos"] to cur["pos"] + 1
+    set out to []
+    _skip_ws(s, cur)
+    if _char_at(s, cur["pos"]) is "]":
+        set cur["pos"] to cur["pos"] + 1
+        give back out
+    while yes:
+        put _parse_value(s, cur) in out
+        _skip_ws(s, cur)
+        if cur["pos"] is bigger than length(s):
+            unwrap(error(_err_text(cur["pos"], "unterminated array")))
+        set c to item_of(cur["pos"], s)
+        if c is ",":
+            set cur["pos"] to cur["pos"] + 1
+        otherwise if c is "]":
+            set cur["pos"] to cur["pos"] + 1
+            give back out
+        otherwise:
+            unwrap(error(_err_text(cur["pos"], "expected \",\" or \"]\"")))
+
+# _parse_string(s, cur) -> text
+# Parse a "..." string starting at cur["pos"] (which holds the opening
+# quote); all JSON escapes are decoded, see _parse_escape.
+# example: json._parse_string("\"hi\"", {pos: 1}) -> hi
+# example: length(json._parse_string("\"a\\nb\"", {pos: 1})) -> 3
+# example: json._parse_string("\"a\\u0041b\"", {pos: 1}) -> aAb
+to _parse_string with s: text, cur: map -> text:
+    set cur["pos"] to cur["pos"] + 1
+    set out to ""
+    while yes:
+        if cur["pos"] is bigger than length(s):
+            unwrap(error(_err_text(cur["pos"], "unterminated string")))
+        set c to item_of(cur["pos"], s)
+        if c is "\"":
+            set cur["pos"] to cur["pos"] + 1
+            give back out
+        otherwise if c is "\\":
+            set cur["pos"] to cur["pos"] + 1
+            if cur["pos"] is bigger than length(s):
+                unwrap(error(_err_text(cur["pos"], "unterminated string")))
+            set out to out + _parse_escape(s, cur)
+        otherwise:
+            set out to out + c
+            set cur["pos"] to cur["pos"] + 1
+
+# _parse_escape(s, cur) -> text
+# Decode the JSON escape at cur["pos"] (the character after the
+# backslash); leaves cur["pos"] just past the escape. \uXXXX escapes go
+# through _parse_unicode.
+# example: json._parse_escape("\"x", {pos: 1}) -> "
+# example: length(json._parse_escape("nx", {pos: 1})) -> 1
+# example: json._parse_escape("u0041x", {pos: 1}) -> A
+to _parse_escape with s: text, cur: map -> text:
+    set epos to cur["pos"]
+    set c to item_of(epos, s)
+    set cur["pos"] to epos + 1
+    if c is "\"":
+        give back "\""
+    otherwise if c is "\\":
+        give back "\\"
+    otherwise if c is "/":
+        give back "/"
+    otherwise if c is "b":
+        give back "\b"
+    otherwise if c is "f":
+        give back "\f"
+    otherwise if c is "n":
+        give back "\n"
+    otherwise if c is "r":
+        give back "\r"
+    otherwise if c is "t":
+        give back "\t"
+    otherwise if c is "u":
+        give back _parse_unicode(s, cur)
+    otherwise:
+        unwrap(error(_err_text(epos, "bad escape \"\\" + c + "\"")))
+
+# _parse_unicode(s, cur) -> text
+# Decode the four hex digits at cur["pos"] (the \u was already consumed);
+# leaves cur["pos"] just past the digits. Only U+0000..U+007F (ASCII) are
+# supported; anything higher is a parse error naming the position of the
+# \u. (The WASM backend cannot hold multibyte characters in longer
+# strings, so \u0080 and above are rejected on every backend to stay
+# byte-identical; write such characters as raw UTF-8 instead.)
+# example: json._parse_unicode("0041\"", {pos: 1}) -> A
+# example: json._parse_unicode("000a\"", {pos: 1}) is "\n" -> yes
+to _parse_unicode with s: text, cur: map -> text:
+    set upos to cur["pos"]
+    set code to 0
+    set i to 0
+    while i is smaller than 4:
+        if cur["pos"] is bigger than length(s):
+            unwrap(error(_err_text(cur["pos"], "unexpected end of input")))
+        set d to _hex_val(item_of(cur["pos"], s))
+        if d is smaller than 0:
+            unwrap(error(_err_text(cur["pos"], "bad \\u escape")))
+        set code to code * 16 + d
+        set cur["pos"] to cur["pos"] + 1
+        add 1 to i
+    if code is bigger than 127:
+        unwrap(error(_err_text(upos, "\\u escapes above U+007F are not supported")))
+    give back item_of(code + 1, _u_table())
+
+# _hex_val(c) -> number
+# Value of the hex digit c (case-insensitive), or -1 for anything else.
+# example: json._hex_val("e") -> 14
+# example: json._hex_val("9") -> 9
+# example: json._hex_val("q") -> -1
+to _hex_val with c: text -> number:
+    set low to lower(c)
+    set i to 1
+    while i is at most 16:
+        if item_of(i, "0123456789abcdef") is low:
+            give back i - 1
+        add 1 to i
+    give back -1
+
+# _u_table() -> text
+# The 128 ASCII characters U+0000..U+007F in order, so item_of(code + 1,
+# _u_table()) is the character for a \u00XX escape with XX <= 7F.
+# example: length(json._u_table()) -> 128
+# example: item_of(66, json._u_table()) -> A
+to _u_table -> text:
+    give back "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\u0008\u0009\u000a\u000b\u000c\u000d\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f\u0020\u0021\u0022\u0023\u0024\u0025\u0026\u0027\u0028\u0029\u002a\u002b\u002c\u002d\u002e\u002f\u0030\u0031\u0032\u0033\u0034\u0035\u0036\u0037\u0038\u0039\u003a\u003b\u003c\u003d\u003e\u003f\u0040\u0041\u0042\u0043\u0044\u0045\u0046\u0047\u0048\u0049\u004a\u004b\u004c\u004d\u004e\u004f\u0050\u0051\u0052\u0053\u0054\u0055\u0056\u0057\u0058\u0059\u005a\u005b\u005c\u005d\u005e\u005f\u0060\u0061\u0062\u0063\u0064\u0065\u0066\u0067\u0068\u0069\u006a\u006b\u006c\u006d\u006e\u006f\u0070\u0071\u0072\u0073\u0074\u0075\u0076\u0077\u0078\u0079\u007a\u007b\u007c\u007d\u007e\u007f"
+
+# _decimal_exp(int_d, frac_d, exp_val) -> any
+# The decimal exponent E with 10^E <= |value| < 10^(E+1) for the number
+# being scanned (int_d/frac_d are its digit runs, exp_val its exponent),
+# or nothing when the value is zero. Used to reject magnitudes >= 1e15,
+# which the three backends cannot represent the same way.
+# example: json._decimal_exp("1", "", 21) -> 21
+# example: json._decimal_exp("0", "05", 0) -> -2
+# example: json._decimal_exp("0", "00", 0) -> nothing
+to _decimal_exp with int_d: text, frac_d: text, exp_val: number -> any:
+    set k to 1
+    while _char_at(int_d, k) is "0":
+        add 1 to k
+    set sig to ""
+    while k is at most length(int_d):
+        set sig to sig + item_of(k, int_d)
+        add 1 to k
+    if sig is not "":
+        give back length(sig) - 1 + exp_val
+    set j to 1
+    while j is at most length(frac_d):
+        if item_of(j, frac_d) is not "0":
+            give back 0 - j + exp_val
+        add 1 to j
+    give back nothing
+
+# _parse_number(s, cur) -> number
+# Parse a JSON number at cur["pos"] (leading - or digit). The grammar
+# -?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)? is validated by hand;
+# then the exact slice goes through try_number. Magnitudes >= 1e15 are a
+# "number out of range" parse error.
+# example: json._parse_number("42,", {pos: 1}) -> 42
+# example: json._parse_number("3.25]", {pos: 1}) -> 3.25
+# example:
+#   set cur to {pos: 1}
+#   json._parse_number("42,", cur)
+#   cur["pos"] -> 3
+to _parse_number with s: text, cur: map -> number:
+    set start to cur["pos"]
+    if item_of(cur["pos"], s) is "-":
+        set cur["pos"] to cur["pos"] + 1
+        if cur["pos"] is bigger than length(s):
+            unwrap(error(_err_text(cur["pos"], "unexpected end of input")))
+    set int_d to ""
+    set c to item_of(cur["pos"], s)
+    if c is "0":
+        set int_d to "0"
+        set cur["pos"] to cur["pos"] + 1
+    otherwise if has("123456789", c):
+        while _is_digit(_char_at(s, cur["pos"])):
+            set int_d to int_d + item_of(cur["pos"], s)
+            set cur["pos"] to cur["pos"] + 1
+    otherwise:
+        unwrap(error(_err_text(cur["pos"], "bad number")))
+    set frac_d to ""
+    if _char_at(s, cur["pos"]) is ".":
+        set cur["pos"] to cur["pos"] + 1
+        if _is_digit(_char_at(s, cur["pos"])) is no:
+            unwrap(error(_err_text(cur["pos"], "bad number")))
+        while _is_digit(_char_at(s, cur["pos"])):
+            set frac_d to frac_d + item_of(cur["pos"], s)
+            set cur["pos"] to cur["pos"] + 1
+    set exp_d to ""
+    if _char_at(s, cur["pos"]) is "e" or _char_at(s, cur["pos"]) is "E":
+        set cur["pos"] to cur["pos"] + 1
+        if _char_at(s, cur["pos"]) is "+" or _char_at(s, cur["pos"]) is "-":
+            set exp_d to item_of(cur["pos"], s)
+            set cur["pos"] to cur["pos"] + 1
+        if _is_digit(_char_at(s, cur["pos"])) is no:
+            unwrap(error(_err_text(cur["pos"], "bad number")))
+        while _is_digit(_char_at(s, cur["pos"])):
+            set exp_d to exp_d + item_of(cur["pos"], s)
+            set cur["pos"] to cur["pos"] + 1
+    set exp_val to 0
+    if exp_d is not "":
+        set exp_val to unwrap(try_number(exp_d))
+    set e to _decimal_exp(int_d, frac_d, exp_val)
+    if e is not nothing and e is bigger than 14:
+        unwrap(error(_err_text(start, "number out of range")))
+    set slice to ""
+    set i to start
+    while i is smaller than cur["pos"]:
+        set slice to slice + item_of(i, s)
+        add 1 to i
+    set n to unwrap(try_number(slice))
+    if n is not 0 and n * 2 is n:
+        unwrap(error(_err_text(start, "number out of range")))
+    give back n
+
+# _escape_char(c) -> text
+# The JSON escape for one character: \" \\ \n \t \r \b \f, \u00XX for
+# other codepoints below U+0020, and c itself otherwise.
+# example: json._escape_char("\"") -> \"
+# example: json._escape_char("\\") -> \\
+# example: json._escape_char("a") -> a
+to _escape_char with c: text -> text:
+    if c is "\"":
+        give back "\\\""
+    if c is "\\":
+        give back "\\\\"
+    if c is "\n":
+        give back "\\n"
+    if c is "\t":
+        give back "\\t"
+    if c is "\r":
+        give back "\\r"
+    if c is "\b":
+        give back "\\b"
+    if c is "\f":
+        give back "\\f"
+    set hi to 0
+    set lo to 0
+    set i to 1
+    while i is at most 32:
+        if item_of(i, _u_table()) is c:
+            give back "\\u00" + item_of(hi + 1, "0123456789abcdef") + item_of(lo + 1, "0123456789abcdef")
+        add 1 to lo
+        if lo is 16:
+            set lo to 0
+            add 1 to hi
+        add 1 to i
+    give back c
+
+# _stringify_string(s) -> text
+# Quote s for JSON, escaping through _escape_char per character.
+# example: json._stringify_string("a\"b") -> "a\"b"
+# example: json._stringify_string("hi") -> "hi"
+to _stringify_string with s: text -> text:
+    set out to "\""
+    for each c in s:
+        set out to out + _escape_char(c)
+    give back out + "\""
+
+# _stringify_list(items) -> text
+# The inside of a JSON array: elements joined with "," (no brackets).
+# example: json._stringify_list([1, "a"]) -> 1,"a"
+# example: json._stringify_list([1, "a", nothing]) -> 1,"a",null
+to _stringify_list with items: list -> text:
+    set out to ""
+    set first to yes
+    for each v in items:
+        if first is no:
+            set out to out + ","
+        set out to out + stringify(v)
+        set first to no
+    give back out
+
+# _stringify_record(rec) -> text
+# The inside of a JSON object: "key":value pairs in insertion order,
+# joined with "," (no braces).
+# example: json._stringify_record({b: 1}) -> "b":1
+# example: json._stringify_record({a: 1, b: "x"}) -> "a":1,"b":"x"
+to _stringify_record with rec: map -> text:
+    set out to ""
+    set first to yes
+    for each k in keys(rec):
+        if first is no:
+            set out to out + ","
+        set out to out + _stringify_string(k) + ":" + stringify(rec[k])
+        set first to no
+    give back out
+
+# _stringify_number(value) -> text
+# Render a number with text(); anything that is not a finite number is
+# a "json stringify error" (functions have no JSON form, and neither do
+# infinite or NaN values).
+# example: json._stringify_number(42) -> 42
+# example: json._stringify_number(1.5) -> 1.5
+# example: json._stringify_number(-0.5) -> -0.5
+to _stringify_number with value -> text:
+    set t to text(value)
+    if is_error(try_number(t)):
+        unwrap(error("json stringify error: cannot encode this value"))
+    set n to unwrap(try_number(t))
+    if not (n is n):
+        unwrap(error("json stringify error: cannot encode NaN"))
+    if n is not 0 and n * 2 is n:
+        unwrap(error("json stringify error: cannot encode an infinite number"))
+    give back t
