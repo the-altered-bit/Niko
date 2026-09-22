@@ -1,0 +1,11 @@
+# Fibonacci numbers, iterative style.
+to fib with n:
+    set a to 0
+    set b to 1
+    for each i in numbers 1 to n:
+        set t to a + b
+        set a to b
+        set b to t
+    give back a
+
+say "fib(20) =", fib(20)

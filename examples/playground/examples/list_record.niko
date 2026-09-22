@@ -1,0 +1,12 @@
+# Lists and records.
+set nums to [1, 2, 3, 4, 5]
+say "sum:", sum(nums)
+say "length:", length(nums)
+say "item 3:", nums[3]
+
+put 6 in nums
+say "after put:", nums
+
+set person to {name: "Niko", age: 2, languages: ["Niko", "Python"]}
+say person.name, "is", person.age, "years old"
+say "speaks:", person.languages

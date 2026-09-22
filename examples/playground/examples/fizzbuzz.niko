@@ -1,0 +1,10 @@
+# FizzBuzz, Niko style.
+for each n in numbers 1 to 30:
+    if n % 15 is 0:
+        say "FizzBuzz"
+    otherwise if n % 3 is 0:
+        say "Fizz"
+    otherwise if n % 5 is 0:
+        say "Buzz"
+    otherwise:
+        say n

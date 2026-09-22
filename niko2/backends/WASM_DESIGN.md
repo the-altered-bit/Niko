@@ -59,6 +59,7 @@ Things WASM cannot do alone are imported; the Node shim implements them:
 | niko_today | () -> (i32,i32) | ISO date text, return (ptr,len) |
 | niko_now | () -> (i32,i32) | ISO datetime text, return (ptr,len) |
 | niko_sleep | (f64) -> () | sleep seconds |
+| niko_pow | (f64,f64) -> f64 | power: `**` on numbers (JS Math.pow) |
 
 Number formatting deliberately lives in the host: correct float formatting
 is a large algorithm, and the host already speaks the language's `fmt`
@@ -99,8 +100,10 @@ which avoids recovering control flow from flat jumps.
   same value (affects `join`'s Python-`str` formatting corner only).
 - Text case ops (`upper`/`lower`) are ASCII-only; `for each` over text
   iterates bytes.
-- No `use` imports (single file), no file I/O builtins, no method-call
-  syntax (`x.upper()` — use `upper(x)`).
+- No file I/O builtins, no method-call
+  syntax (`x.upper()` — use `upper(x)`). Multi-file programs compile too:
+  since Alpha 22, `import` and `use` are routed through the module
+  pipeline and desugared before the backend runs.
 - `today`/`now` formatting may differ from the VM in sub-second digits.
 
 ## Closures and first-class functions (Alpha 10)

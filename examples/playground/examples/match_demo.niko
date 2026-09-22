@@ -1,0 +1,27 @@
+# match: pattern matching on values, results, and lists.
+set day to "Saturday"
+match day:
+    when "Saturday", "Sunday":
+        say "Weekend!"
+    otherwise:
+        say "Weekday."
+
+match try_number("42"):
+    when ok n:
+        say "parsed:", n * 2
+    when error msg:
+        say "oops:", msg
+
+match try_number("abc"):
+    when ok n:
+        say "parsed:", n
+    when error msg:
+        say "could not parse:", msg
+
+match [1, 2, 3]:
+    when [first, ...rest]:
+        say "head:", first, "tail:", rest
+    when []:
+        say "empty"
+    otherwise:
+        say "something else"

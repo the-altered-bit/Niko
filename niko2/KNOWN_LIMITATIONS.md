@@ -408,3 +408,22 @@ What remains (known limits, not bugs):
   a runtime failure inside a module says e.g. `Niko error in main.niko`
   with the module's line number. The DAP adapter already maps frames
   to files; `niko2 run`'s error printer does not yet.
+
+## Alpha 29 playground notes
+
+`examples/playground/` runs Niko 2 in the browser (Pyodide + WASM).
+Browser differences from `niko2 run`, all deliberate:
+
+- **File builtins fail at compile time** with a clean Niko error —
+  the browser build has no filesystem for the guest.
+- **`ask` uses the blocking browser `prompt()`** (headless browsers
+  may auto-dismiss it; the program then sees an empty answer).
+- **`sleep(x)` is a capped busy-wait (max 2 s)** — it blocks the tab.
+- **No `pkg:` imports** — no network, no registry in the browser.
+  `import "stdlib/....niko"` works (stdlib ships inside the bundle).
+- **Programs are in-memory only** — nothing persists across reloads.
+- **An infinite loop hangs the tab** — WebAssembly can't be
+  pre-empted; close/reload to recover.
+- The in-browser end-to-end test (`e2e.mjs`) could not run on the
+  build machine (Pyodide CDN unreachable from it); one networked run
+  is still owed before the page is called proven.

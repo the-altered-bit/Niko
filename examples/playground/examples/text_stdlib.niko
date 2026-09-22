@@ -1,0 +1,8 @@
+# The bundled text stdlib, imported from the browser build.
+import "stdlib/text.niko" as text
+
+say text.title("hello WORLD")
+say text.words("  split   me  up ")
+say text.slugify("Hello, World! 2026")
+say text.repeat("ha", 3)
+say text.truncate("a very long sentence", 10)
