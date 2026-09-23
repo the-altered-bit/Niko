@@ -167,6 +167,7 @@
     <li><a href="#ch15">Three machines, one language</a></li>
     <li><a href="#ch16">Mini projects: build three things</a></li>
     <li><a href="#ch17">Where to go next</a></li>
+    <li><a href="#ch18">The niko2 toolbox</a></li>
   </ol>
 </nav>
 
@@ -999,6 +1000,84 @@ Hello, world!
     something <i>you</i> want to exist. Pick the idea above that made you smile
     and start. When you get stuck (you will &mdash; everyone does), re-read
     Chapter 12, fix one thing, and keep going. Happy coding! &#x1F389;</p>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 18 ================= -->
+<section class="chapter" id="ch18">
+  <span class="chnum">Chapter 18</span>
+  <h2 class="ch">The niko2 toolbox</h2>
+  <p>So far you've mostly used one command: <span class="kbd">niko2 run</span>.
+  But <span class="kbd">niko2</span> is a whole toolbox. Here are the tools you'll
+  reach for first &mdash; each one does one job, and does it well.</p>
+
+  <h3>run &mdash; the starter</h3>
+  <p>Runs your program. You know this one by heart now:</p>
+
+  <div class="terminal"><div class="bar"><span class="dot" style="background:#FF6B6B"></span><span class="dot" style="background:#FFC93D"></span><span class="dot" style="background:#58B368"></span>terminal</div><pre><span class="prompt">$</span> <span class="cmd">python3 -m niko2 run hello.niko</span>
+Hello, world!
+</pre></div>
+
+  <h3>check &mdash; the proofreader</h3>
+  <p><span class="kbd">check</span> reads your program and points out mistakes
+  <i>without</i> running it. Fast, safe, and great before you show your code
+  to anyone:</p>
+
+  <div class="terminal"><div class="bar"><span class="dot" style="background:#FF6B6B"></span><span class="dot" style="background:#FFC93D"></span><span class="dot" style="background:#58B368"></span>terminal</div><pre><span class="prompt">$</span> <span class="cmd">python3 -m niko2 check docs/beginners-examples/hello.niko</span>
+<span class="out-dim">&#10003; docs/beginners-examples/hello.niko: no type errors</span>
+</pre></div>
+
+  <h3>fmt &mdash; the tidier</h3>
+  <p>Messy spacing? Mixed-up quotes? <span class="kbd">fmt</span> cleans your code
+  automatically. Watch:</p>
+
+  <div class="codeblock"><div class="bar"><span class="dot" style="background:#FF6B6B"></span><span class="dot" style="background:#FFC93D"></span><span class="dot" style="background:#58B368"></span><span class="fname">messy.niko (before)</span></div><pre class="niko">say    "Hello, world!"</pre></div>
+
+  <div class="terminal"><div class="bar"><span class="dot" style="background:#FF6B6B"></span><span class="dot" style="background:#FFC93D"></span><span class="dot" style="background:#58B368"></span>terminal</div><pre><span class="prompt">$</span> <span class="cmd">python3 -m niko2 fmt messy.niko</span>
+<span class="out-dim">formatted messy.niko</span>
+</pre></div>
+
+  <p>Now the file reads <span class="kbd">say 'Hello, world!'</span> &mdash; single
+  spaces, tidy quotes, same program.</p>
+
+  <div class="tip">
+    <p><b class="who">Niko says:</b> <span class="kbd">niko2 fmt --check</span>
+    only <i>reports</i> messy files without changing them &mdash; handy when you
+    want to look before you tidy.</p>
+  </div>
+
+  <h3>repl &mdash; the conversation</h3>
+  <p>Type <span class="kbd">niko2 repl</span> and Niko talks back, one line at a
+  time. Perfect for trying an idea in five seconds:</p>
+
+  <div class="terminal"><div class="bar"><span class="dot" style="background:#FF6B6B"></span><span class="dot" style="background:#FFC93D"></span><span class="dot" style="background:#58B368"></span>terminal</div><pre><span class="prompt">$</span> <span class="cmd">python3 -m niko2 repl</span>
+<span class="out-dim">Niko 2 REPL (VM). Type :help for help; :quit or Ctrl-D to leave.</span>
+<span class="prompt">niko&gt;</span> <span class="cmd">say "hi from repl"</span>
+hi from repl
+</pre></div>
+
+  <h3>test &mdash; the examiner</h3>
+  <p><span class="kbd">niko2 test</span> runs the checks you've written for your
+  program and tells you what passed and what broke. Professionals test everything
+  &mdash; now you can too.</p>
+
+  <h3>wasm and native &mdash; the translators</h3>
+  <p>You met these two in Chapter 15: <span class="kbd">niko2 wasm</span> turns your
+  program into WebAssembly for browsers, and <span class="kbd">niko2 native</span>
+  builds a fast machine program through C.</p>
+
+  <h3>get &mdash; the borrower</h3>
+  <p><span class="kbd">niko2 get</span> fetches packages other people shared &mdash;
+  extra toy boxes for your programs, installed with one command.</p>
+
+  <div class="tip">
+    <p><b class="who">Niko says:</b> The remaining tools &mdash; <span class="kbd">build</span>,
+    <span class="kbd">disasm</span>, <span class="kbd">init</span>, <span class="kbd">info</span>,
+    <span class="kbd">deps</span>, <span class="kbd">lock</span>, <span class="kbd">publish</span>,
+    <span class="kbd">lsp</span>, <span class="kbd">debug</span>, <span class="kbd">migrate</span>,
+    <span class="kbd">fuzz</span> &mdash; are power tools. You'll meet them in the
+    deeper guide when you're ready. Type <span class="kbd">python3 -m niko2 --help</span>
+    any time to see the full list.</p>
   </div>
 </section>
 
