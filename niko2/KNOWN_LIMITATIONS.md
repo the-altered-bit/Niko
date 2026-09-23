@@ -699,10 +699,11 @@ re-print the prompt. Cosmetic-only (no wrong value, no hang), but it is
 a real stdout divergence the differential campaign flags. Not fixed in
 Alpha 36 (backend-sprint work, next to the `ask`-at-EOF entries above).
 
-## VM: `stop` out of `repeat`/`for each` leaks the loop iterator (Alpha 36, 2026-09-23)
+## VM: `stop` out of `repeat`/`for each` leaked the loop iterator (Alpha 36, fixed in Alpha 37)
 
 Found by the `niko2 fuzz` differential campaign (seed 777, case 2 --
-a vm-only hang; WASM and native agree and terminate). Minimal repro:
+a vm-only hang; WASM and native agree and terminate). Minimal repro
+(now the regression proof):
 
 ```
 repeat 1 times:
@@ -711,36 +712,40 @@ repeat 1 times:
 say "done"
 ```
 
-VM hangs forever; WASM and native print `done`. Root cause
+VM hung forever; WASM and native printed `done`. Root cause
 (`niko2/compiler.py` + `niko2/vm.py`): `repeat` and `for each` drive
 iteration from a per-frame `iter_stack` (`ITER_REPEAT`/`ITER_PREP` push
-an iterator; the `..._NEXT` op pops it on exhaustion). `stop` compiles
+an iterator; the `..._NEXT` op pops it on exhaustion). `stop` compiled
 to a plain `JUMP` to the innermost loop's end address -- the iterator
-is never popped. The stale iterator then corrupts the next enclosing
+was never popped. The stale iterator then corrupted the next enclosing
 `repeat`/`for each` loop's `..._NEXT` op, which consumes from
 `iter_stack[-1]`: in the repro the outer `repeat`'s `REPEAT_NEXT`
-keeps finding the inner `for each`'s unexhausted iterator instead of
-its own, so the repeat never advances and the program loops forever
-(and leaks one iterator per cycle). With different shapes the same
-bug silently yields *wrong iteration values* instead of hanging --
-e.g. a `for each` inside a `while` inside a `for each` resumes the
+kept finding the inner `for each`'s unexhausted iterator instead of
+its own, so the repeat never advanced and the program looped forever
+(and leaked one iterator per cycle). With different shapes the same
+bug silently yielded *wrong iteration values* instead of hanging --
+e.g. a `for each` inside a `while` inside a `for each` resumed the
 outer loop from the inner loop's leftover iterator.
 
-`skip` is unaffected (it jumps to the loop head, where the live
-iterator is correctly advanced). `stop` out of a `while` loop is
-unaffected (no iterator involved), as is `stop` out of a
-`repeat`/`for each` with no `for each`/`repeat` above it (the leaked
-iterator is never consumed).
+**Fixed in Alpha 37:** the compiler's `loop_stack` now records each
+loop's kind (`'repeat'`/`'for'`/`'while'`), and `stop` targeting a
+`repeat`/`for each` emits a new `ITER_POP` opcode before the break
+jump (the normal-exhaustion paths already pop, so the pop belongs on
+the break path only). `skip` is unchanged (it jumps to the loop head,
+where the live iterator is correctly advanced) and `stop` out of a
+`while` emits no pop. WASM and native never had the bug (no iterator
+stack) and are untouched. The fuzzer's `_gen_loop_exit` restriction
+that dodged these shapes is lifted, and `tests/test_fuzz.py` now pins
+that nested `stop`s are generated. Regression coverage:
+`tests/test_stop.py` (31 three-way differential cases + 2
+compile-error cases) plus a 3,000-case focused fuzz campaign with
+zero VM-vs-WASM divergences.
 
-The correct fix is in the compiler/VM: record the loop kind on the
-compiler's `loop_stack` and, for `stop` inside a `repeat`/`for each`,
-emit an iterator-pop before the break jump (the normal-exhaustion
-paths already pop, so the pop belongs on the break path only). Not
-fixed in Alpha 36 (beyond the drive-by budget -- it changes VM loop
-machinery, not a one-liner). The fuzzer avoids the unsafe shapes by
-construction (`niko2/fuzz.py`, `_gen_loop_exit`: `stop` only where the
-innermost loop is a `while`, or where no `for each`/`repeat` encloses
-the stopped loop), pinned by `tests/test_fuzz.py`.
+`skip` was always unaffected (it jumps to the loop head, where the
+live iterator is correctly advanced). `stop` out of a `while` loop
+was always unaffected (no iterator involved), as was `stop` out of a
+`repeat`/`for each` with no `for each`/`repeat` above it (the leaked
+iterator was never consumed).
 
 ## VM vs WASM/native: comparing `yes`/`no` with numbers (Alpha 36, 2026-09-23)
 

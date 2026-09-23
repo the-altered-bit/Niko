@@ -640,3 +640,25 @@ match cases in `tests/test_formatter.py`.
   `fuzz_corpus/` gitignored (local scratch). README gained an Alpha 36
   section. Full suite green (401 pytest). See
   `RELEASE_NOTES_ALPHA36.md` / `ALPHA36_DESIGN.md`.
+
+## Alpha 37 (complete, 2026-09-23): VM `stop` loop-iterator fix
+
+Fixed the highest-value bug from the Alpha 36 fuzz campaign: `stop`
+out of a `repeat`/`for each` never popped the loop's iterator off the
+VM's `iter_stack`, so nested loops hung or silently iterated wrong.
+The compiler's `loop_stack` now records loop kinds and emits a new
+`ITER_POP` before the break jump when `stop` targets a
+`repeat`/`for each` (`niko2/compiler.py` + `niko2/vm.py`, ~10 lines);
+`skip` and `stop`-out-of-`while` unchanged; WASM/native never had the
+bug and are untouched. Fuzzer follow-up: the `_gen_loop_exit`
+restriction that dodged nested `stop`s is lifted (generator now biased
+toward nested-loop-with-exit shapes), a latent `iterated`-set bug
+fixed (now a refcount), and `tests/test_fuzz.py` pins the new
+behavior. New `tests/test_stop.py` (31 three-way differential cases +
+2 compile-error cases). Focused campaign: 3,000 cases, zero
+VM-vs-WASM divergences, no hangs, no new bugs (64 failures all
+triaged to the known native `otherwise if` / `ask number` issues).
+`KNOWN_LIMITATIONS.md` entry rewritten as fixed-in-Alpha-37. Full
+suite green (402 pytest + `tests/test_stop.py`'s 31 cases, 26 Niko 1,
+16 Niko 2 + nikoir round trip).
+See `RELEASE_NOTES_ALPHA37.md` / `ALPHA37_DESIGN.md`.

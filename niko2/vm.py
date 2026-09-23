@@ -233,6 +233,7 @@ class VM:
                 elif op=='ITER_NEXT':
                     try:f.stack.append(next(f.iter_stack[-1]))
                     except StopIteration:f.iter_stack.pop(); f.ip=a
+                elif op=='ITER_POP': f.iter_stack.pop()
                 elif op=='MAKE_FUNCTION':
                     # Alpha 10: the arg is the function's qualname. Captured
                     # names are wrap-or-created into shared Cells in the

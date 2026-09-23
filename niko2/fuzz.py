@@ -38,10 +38,10 @@ Design notes (see ALPHA36_DESIGN.md for the full story):
   `add` and `take` on it); `for each`/`repeat` iterate over bounded
   literals, and `put`/`remove` never target a list an enclosing
   `for each` is iterating (growing it mid-loop never terminates);
-  `stop` is only emitted where the VM's missing iterator-pop on
-  `stop` is harmless (innermost loop is a `while`, or no
-  `for each`/`repeat` encloses the stopped loop); `skip` is always
-  safe; `ask` never appears inside a loop or function body so the
+  `stop`/`skip` are emitted freely inside loop bodies -- the Alpha 37
+  compiler fix emits ITER_POP for `stop` out of a `repeat`/`for each`,
+  so no nesting shape can leak a stale iterator (see `_gen_loop_exit`);
+  `ask` never appears inside a loop or function body so the
   runtime ask count never exceeds the canned stdin lines; calls to
   exponential-time (fib) or huge-value (fact) functions always pass
   small literals (0..12); expression-level calls take terminal-only
@@ -130,16 +130,14 @@ class Gen:
         self.asks = []     # ['text'|'number', ...] in order
         self.ask_budget = 3
         self.protected = set()  # while-loop counters: never reassigned
-        self.iterated = set()   # list vars an enclosing `for each` is
-                                # iterating: `put`/`remove` must not target
-                                # them (growing the list mid-iteration never
-                                # terminates on any backend)
-        self.loop_kinds = []    # kinds of lexically enclosing loops
-                                # ("while"/"for"/"repeat"): `stop` out of a
-                                # `for each`/`repeat` leaves its iterator on
-                                # the VM's iter_stack (VM bug, see
-                                # KNOWN_LIMITATIONS), so `stop` is only
-                                # generated where that is harmless
+        self.iterated = {}    # list var -> number of enclosing `for each`
+                                # loops iterating it: `put`/`remove` must not
+                                # target a var with a live count (growing
+                                # the list mid-iteration never terminates on
+                                # any backend). A count, not a set: nested
+                                # loops can iterate the SAME variable, and a
+                                # plain discard would wrongly clear the
+                                # outer loop's claim (Alpha 37 fix).
         self.func_ret = None    # return type of the function whose body is
                                 # being generated (None at top level): an
                                 # early `give back` must produce this type,
@@ -190,22 +188,14 @@ class Gen:
 
     # -- blocks ---------------------------------------------------------
     def _gen_loop_exit(self):
-        # `stop` breaks the innermost loop by jumping to its end, but the
-        # VM never pops that loop's iterator off the frame's iter_stack
-        # (VM bug -- see KNOWN_LIMITATIONS "stop out of repeat/for each").
-        # If any `for each`/`repeat` encloses the stop's own loop, its
-        # NEXT op later consumes the stale iterator: infinite loop or
-        # silently wrong iteration values. `stop` is therefore only
-        # emitted when harmless: the innermost loop is a `while` (no
-        # iterator involved), or the stop's own `for each`/`repeat` has no
-        # `for each`/`repeat` above it (the leaked iterator is then never
-        # consumed). `skip` only jumps to the loop head and is always safe.
-        kinds = self.loop_kinds
-        inner = kinds[-1] if kinds else None
-        if inner == "while" or not any(
-                k in ("for", "repeat") for k in kinds[:-1]):
-            return self.rng.choice(["stop", "skip"])
-        return "skip"
+        # Alpha 37: the VM iterator-leak bug is fixed -- the compiler now
+        # emits ITER_POP for `stop` out of a `repeat`/`for each`
+        # (compiler.py), so `stop` pops the innermost loop's iterator
+        # before jumping to the loop end and no nesting shape can leave
+        # a stale iterator behind. `skip` jumps to the live loop head and
+        # was always safe. Both are emitted freely wherever a loop
+        # encloses the statement (this is only called with in_loop=True).
+        return self.rng.choice(["stop", "skip"])
 
     def gen_block(self, n, indent, top, in_loop, in_func, depth=3):
         # Block scoping (matches the checker): `set` inside an if/while/
@@ -217,32 +207,47 @@ class Gen:
         lines = []
         pad = "    " * indent
         nest_ok = depth > 0
+        # Alpha 37 bias: heavier coverage of the fixed stop/iterator
+        # space. Inside a loop, stop/skip exits go 0.06 -> 0.10 per
+        # statement and each loop-statement branch widens (while/for
+        # 0.06 -> 0.08, repeat 0.04 -> 0.08), so loop-in-loop shapes are
+        # generated ~1.5x as often; the difference is funded by slightly
+        # less gen_set / match / match-expr inside loops. Outside a loop
+        # every cutoff is exactly Alpha 36's.
+        if in_loop:
+            cuts = (0.10, 0.14, 0.32, 0.42, 0.52, 0.60, 0.68, 0.76,
+                    0.80, 0.84, 0.88, 0.92, 0.94)
+        else:
+            cuts = (0.06, 0.10, 0.32, 0.42, 0.52, 0.58, 0.64, 0.68,
+                    0.74, 0.78, 0.82, 0.86, 0.90)
+        (t_exit, t_give, t_set, t_say, t_if, t_while, t_for, t_repeat,
+         t_match, t_call, t_ask, t_mut, t_mexpr) = cuts
         for _ in range(n):
             choice = self.rng.random()
-            if in_loop and choice < 0.06:
+            if in_loop and choice < t_exit:
                 lines.append(pad + self._gen_loop_exit())
-            elif in_func and choice < 0.10:
+            elif in_func and choice < t_give:
                 # early give back (function still ends with one; harmless
                 # because it produces the function's own return type)
                 lines.append(pad + f"give back {self.gen_expr(self.func_ret, 2)}")
-            elif choice < 0.32 or not nest_ok:
+            elif choice < t_set or not nest_ok:
                 lines += self.gen_set(indent)
-            elif choice < 0.42:
+            elif choice < t_say:
                 lines.append(pad + self.gen_say())
-            elif choice < 0.52:
+            elif choice < t_if:
                 lines += self.gen_if(indent, in_loop, in_func, depth - 1)
-            elif choice < 0.58:
+            elif choice < t_while:
                 lines += self.gen_while(indent, in_func, depth - 1)
-            elif choice < 0.64:
+            elif choice < t_for:
                 lines += self.gen_for(indent, in_func, depth - 1, top)
-            elif choice < 0.68:
+            elif choice < t_repeat:
                 lines += self.gen_repeat(indent, in_func, depth - 1)
-            elif choice < 0.74:
+            elif choice < t_match:
                 lines += self.gen_match_stmt(indent, in_loop, in_func,
                                              depth - 1)
-            elif choice < 0.78 and self.funcs:
+            elif choice < t_call and self.funcs:
                 lines.append(pad + self.gen_call_stmt())
-            elif choice < 0.82 and not in_func and not in_loop \
+            elif choice < t_ask and not in_func and not in_loop \
                     and len(self.asks) < 3:
                 # ask only outside loops/functions: every ask statement then
                 # executes at most once, so the runtime ask count never
@@ -250,9 +255,9 @@ class Gen:
                 # across backends: VM errors, wasm text-ask yields "",
                 # wasm number-ask reprompts forever).
                 lines.append(pad + self.gen_ask())
-            elif choice < 0.86:
+            elif choice < t_mut:
                 lines += self.gen_mutate(indent)
-            elif choice < 0.90:
+            elif choice < t_mexpr:
                 lines += self.gen_match_expr_stmt(indent)
             else:
                 lines += self.gen_set(indent)
@@ -357,7 +362,6 @@ class Gen:
         # Protect the counter while the body generates: a `set c to ...`
         # inside the body would reset it and hang the loop forever.
         self.protected.add(c)
-        self.loop_kinds.append("while")
         lines = [pad + f"set {c} to 0",
                  pad + f"while {c} is smaller than {k}:"]
         body = [pad + "    " + f"set {c} to {c} + 1"]
@@ -367,7 +371,6 @@ class Gen:
         if self.rng.random() < 0.3:
             body.append(pad + "    " + f"say {c}")
         self.protected.discard(c)
-        self.loop_kinds.pop()
         return lines + body
 
     def gen_for(self, indent, in_func, depth=3, top=False):
@@ -391,15 +394,17 @@ class Gen:
             src, et = "[" + ", ".join(elems) + "]", ("int",)
         self.env[it] = et
         if srcvar is not None:
-            self.iterated.add(srcvar)
-        self.loop_kinds.append("for")
+            self.iterated[srcvar] = self.iterated.get(srcvar, 0) + 1
         lines = [pad + f"for each {it} in {src}:"]
         lines += self.gen_block(self.rng.randint(1, 3), indent + 1,
                                 top=False, in_loop=True, in_func=in_func,
                                 depth=depth)
-        self.loop_kinds.pop()
         if srcvar is not None:
-            self.iterated.discard(srcvar)
+            left = self.iterated[srcvar] - 1
+            if left:
+                self.iterated[srcvar] = left
+            else:
+                del self.iterated[srcvar]
         # Loop var scope (matches the checker): visible after the loop only
         # when the `for` sits directly at module top level; everywhere else
         # it is scoped to the loop statement itself.
@@ -410,11 +415,9 @@ class Gen:
     def gen_repeat(self, indent, in_func, depth=3):
         pad = "    " * indent
         lines = [pad + f"repeat {self.rng.randint(0, 5)} times:"]
-        self.loop_kinds.append("repeat")
         lines += self.gen_block(self.rng.randint(1, 3), indent + 1,
                                 top=False, in_loop=True, in_func=in_func,
                                 depth=depth)
-        self.loop_kinds.pop()
         return lines
 
     def gen_match_stmt(self, indent, in_loop, in_func, depth=3):
@@ -652,8 +655,6 @@ class Gen:
         ret = self.rng.choice([("int",), ("text", True), ("bool",),
                                ("list", ("int",)), ("nothing",)])
         saved_env = dict(self.env)
-        saved_kinds = self.loop_kinds
-        self.loop_kinds = []  # function bodies run in a fresh VM frame
         saved_ret, self.func_ret = self.func_ret, ret
         for p in params:
             self.env[p] = ("any",)
@@ -667,7 +668,6 @@ class Gen:
         else:
             lines.append(f"    give back {self.gen_expr(ret, 2)}")
         self.env = saved_env
-        self.loop_kinds = saved_kinds
         self.func_ret = saved_ret
         self.funcs[fname] = (ptypes, ret)
         # a call site right away keeps the function exercised

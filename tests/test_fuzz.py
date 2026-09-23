@@ -10,8 +10,10 @@ campaign results.
 
 Also pins the generator's termination guarantees: while-loop counters
 are never reassigned in the body, `ask` never appears inside a loop or
-function body, and exponential-time (fib) / huge-value (fact) calls only
-ever receive small literals.
+function body, `stop`/`skip` always sit inside a loop (and the formerly
+forbidden nested-iterator `stop` shapes are now generated, now that the
+Alpha 37 compiler fix makes them safe), and exponential-time (fib) /
+huge-value (fact) calls only ever receive small literals.
 """
 import pathlib
 import shutil
@@ -196,14 +198,21 @@ def test_fuzz_foreach_never_mutates_iterated_list():
     assert checked > 0, "no for-each over a list var in 300 programs?"
 
 
-def test_fuzz_stop_only_where_iterator_leak_is_harmless():
-    # The VM never pops a repeat/for-each iterator on `stop` (see
-    # KNOWN_LIMITATIONS): `stop` may only appear where the innermost
-    # loop is a `while`, or where no `for each`/`repeat` encloses the
-    # stopped loop. Static check over 300 generated programs with an
-    # indent stack tracking loop kinds.
+def test_fuzz_stop_free_in_nested_loops():
+    # Alpha 37: the VM iterator-leak bug is fixed (the compiler emits
+    # ITER_POP for `stop` out of a `repeat`/`for each`), so `stop` is
+    # safe in every nesting shape and the generator emits it freely.
+    # Static check over 300 generated programs with an indent stack
+    # tracking loop kinds:
+    #   1. every `stop`/`skip` still sits inside a loop (a bare one is a
+    #      compile error -- the generator invariant that remains), and
+    #   2. the previously-forbidden shapes are actually generated now:
+    #      `stop` out of a `for each`/`repeat` with another
+    #      `for each`/`repeat` above it (Alpha 36's `_gen_loop_exit`
+    #      would only ever emit `skip` there).
     import re
     g = fuzz_mod.Gen(4242)
+    nested_stop = 0
     checked = 0
     for _ in range(300):
         src, _ = g.gen_program()
@@ -215,14 +224,13 @@ def test_fuzz_stop_only_where_iterator_leak_is_harmless():
             s = line.strip()
             while stack and stack[-1][0] >= indent:
                 stack.pop()
-            if s == "stop":
+            if s in ("stop", "skip"):
                 kinds = [k for _, k in stack if k]
-                assert kinds, f"stop outside any loop:\n{src}"
-                inner = kinds[-1]
-                ok = inner == "while" or not any(
-                    k in ("for", "repeat") for k in kinds[:-1])
-                assert ok, f"unsafe stop with loop stack {kinds}:\n{src}"
+                assert kinds, f"{s} outside any loop:\n{src}"
                 checked += 1
+                if s == "stop" and kinds[-1] != "while" and any(
+                        k in ("for", "repeat") for k in kinds[:-1]):
+                    nested_stop += 1
             if s.endswith(":"):
                 kind = None
                 if re.match(r"^while ", s):
@@ -232,7 +240,9 @@ def test_fuzz_stop_only_where_iterator_leak_is_harmless():
                 elif re.match(r"^repeat ", s):
                     kind = "repeat"
                 stack.append((indent, kind))
-    assert checked > 0, "no stop generated in 300 programs?"
+    assert checked > 0, "no stop/skip generated in 300 programs?"
+    assert nested_stop > 0, \
+        "no stop out of a nested for-each/repeat in 300 programs?"
 
 
 def test_fuzz_function_give_backs_match_modeled_return_type():

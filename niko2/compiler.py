@@ -74,30 +74,39 @@ class Compiler:
         elif isinstance(n,RepeatStmt):
             self.expr(n.count,b); b.emit('ITER_REPEAT',line=n.line)
             start=len(b.code); b.emit('REPEAT_NEXT',None,n.line); end_jump=len(b.code)-1
-            self.loop_stack.append((start,[],[]))
+            self.loop_stack.append((start,[],[],'repeat'))
             for x in n.body:self.stmt(x,b)
-            b.emit('REPEAT_BACK',start,n.line); _,breaks,conts=self.loop_stack.pop()
+            b.emit('REPEAT_BACK',start,n.line); _,breaks,conts,_=self.loop_stack.pop()
             end=len(b.code); b.patch(end_jump,end)
             for p in breaks:b.patch(p,end)
             for p in conts:b.patch(p,start)
         elif isinstance(n,ForStmt):
             self.expr(n.iterable,b); b.emit('ITER_PREP',line=n.line); start=len(b.code); nxt=b.emit('ITER_NEXT',None,n.line)
             b.emit('STORE',n.name,n.line)
-            self.loop_stack.append((start,[],[]))
+            self.loop_stack.append((start,[],[],'for'))
             for x in n.body:self.stmt(x,b)
-            b.emit('JUMP',start,n.line); _,breaks,conts=self.loop_stack.pop(); end=len(b.code); b.patch(nxt,end)
+            b.emit('JUMP',start,n.line); _,breaks,conts,_=self.loop_stack.pop(); end=len(b.code); b.patch(nxt,end)
             for p in breaks:b.patch(p,end)
             for p in conts:b.patch(p,start)
         elif isinstance(n,WhileStmt):
             start=len(b.code); self.expr(n.cond,b); j=b.emit('JUMP_IF_FALSE',None,n.line)
-            self.loop_stack.append((start,[],[]))
+            self.loop_stack.append((start,[],[],'while'))
             for x in n.body:self.stmt(x,b)
-            b.emit('JUMP',start,n.line); _,breaks,conts=self.loop_stack.pop(); end=len(b.code); b.patch(j,end)
+            b.emit('JUMP',start,n.line); _,breaks,conts,_=self.loop_stack.pop(); end=len(b.code); b.patch(j,end)
             for p in breaks:b.patch(p,end)
             for p in conts:b.patch(p,start)
         elif isinstance(n,(StopStmt,SkipStmt)):
             if not self.loop_stack: raise CompileError(f'{"stop" if isinstance(n,StopStmt) else "skip"} must be inside a loop', line=n.line)
-            start,breaks,conts=self.loop_stack[-1]; p=b.emit('JUMP',None,n.line)
+            start,breaks,conts,kind=self.loop_stack[-1]
+            # Alpha 37: `stop` out of a `repeat`/`for each` must pop the
+            # loop's iterator first. Otherwise the stale iterator sits on
+            # the frame's iter_stack and corrupts the next enclosing
+            # iterator loop's ..._NEXT (hang or wrong values). `skip`
+            # jumps to the loop head where the live iterator is advanced,
+            # and `stop` out of `while` has no iterator, so neither pops.
+            if isinstance(n,StopStmt) and kind in ('repeat','for'):
+                b.emit('ITER_POP',line=n.line)
+            p=b.emit('JUMP',None,n.line)
             (breaks if isinstance(n,StopStmt) else conts).append(p)
         else: raise CompileError(f'unsupported statement {type(n).__name__}', line=n.line)
 
