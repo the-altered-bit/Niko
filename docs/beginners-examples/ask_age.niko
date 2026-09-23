@@ -1,0 +1,3 @@
+ask number "How old are you? " into age
+set older to age + 5
+say "In 5 years you will be", older

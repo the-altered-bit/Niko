@@ -1,0 +1,7 @@
+set score to 20
+if score is 20:
+    say "You got a perfect score!"
+otherwise if score is 10:
+    say "Halfway there!"
+otherwise:
+    say "Keep practicing!"

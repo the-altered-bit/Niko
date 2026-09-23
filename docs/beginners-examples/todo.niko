@@ -1,0 +1,7 @@
+set todos to ["Do my homework", "Tidy my room", "Feed the fish"]
+say "My todo list:"
+for each job in todos:
+    say "-", job
+set item 2 of todos to "Tidy my room (done!)"
+say "Updated:"
+say todos

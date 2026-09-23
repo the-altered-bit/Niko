@@ -683,3 +683,21 @@ smoke test runs native again (sampled 1-in-10; was excluded pending
 this fix). `KNOWN_LIMITATIONS.md` entry rewritten as
 fixed-in-Alpha-38. Full suite green 402 pytest + `tests/test_native_otherwise.py`'s 13 three-way cases, 26 Niko 1, 16 Niko 2 + nikoir round trip.
 See `RELEASE_NOTES_ALPHA38.md` / `ALPHA38_DESIGN.md`.
+
+## Alpha 39 (complete, 2026-09-23): the beginner's guide
+
+Built the child-friendly A-to-Z tutorial Casper asked for:
+`docs/niko-beginners-guide.html` — one self-contained page (inline CSS/SVG,
+tiny inline highlighter, no external dependencies, `file://`-ready), 17
+chapters from setup to three mini projects (guessing game, todo list, quiz),
+28 code blocks + 27 terminal sessions, SVG mascot and diagrams, "Try it
+yourself" boxes, simple-English tone throughout. Links to
+`docs/niko-guide.html` as the deeper reference rather than duplicating it.
+`docs/beginners-examples/` holds all 24 example programs as runnable
+`.niko` files. Every example verified against the real `niko2` CLI (exact
+outputs captured; `ask` inputs piped via `printf`; backends example run all
+three ways). Writing the examples surfaced several language quirks
+(errors→stdout, lists can't grow, `fmt` quote normalization, `yes`/`no`
+printing, wasm/native `✓ built` lines) — documented in
+`ALPHA39_DESIGN.md`, unchanged, candidates for future sprints. Full suite
+green. See `RELEASE_NOTES_ALPHA39.md` / `ALPHA39_DESIGN.md`.

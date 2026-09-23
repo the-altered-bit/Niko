@@ -1,0 +1,4 @@
+set person to {"name": "Niko", "age": 2}
+say person["name"]
+say person.age
+say "Age:", person["age"]

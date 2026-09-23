@@ -1,0 +1,10 @@
+set secret to 7
+say "I am thinking of a number from 1 to 10."
+ask number "Your guess: " into guess
+while guess is not 7:
+    if guess is smaller than 7:
+        say "Too small!"
+    otherwise:
+        say "Too big!"
+    ask number "Try again: " into guess
+say "You got it!"

@@ -1,0 +1,4 @@
+import "stdlib/text.niko" as text
+say text.title("hello WORLD")
+say text.capitalize("niko is fun")
+say text.words("the quick brown fox")

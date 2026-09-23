@@ -1,0 +1,6 @@
+import "stdlib/math.niko" as math
+say 2 + 3 * 4
+say 10 / 4
+say sum([1, 2, 3, 4])
+say math.gcd(12, 18)
+say math.clamp(15, 0, 10)

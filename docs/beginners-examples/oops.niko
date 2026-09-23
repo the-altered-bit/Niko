@@ -1,0 +1,2 @@
+say "Adding text and a number:"
+say "cookies: " + 3

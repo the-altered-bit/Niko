@@ -1,0 +1,2 @@
+for each treat in ["ice cream", "pizza", "cake"]:
+    say "I love", treat

@@ -1,0 +1,6 @@
+for each n in numbers 1 to 10:
+    if n is 7:
+        stop
+    if n % 2 is 0:
+        skip
+    say n

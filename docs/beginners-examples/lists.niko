@@ -1,0 +1,5 @@
+set pets to ["dog", "cat", "hamster"]
+say "I have", length(pets), "pets."
+say "The second one is a", 2 of pets
+for each pet in pets:
+    say "I love my", pet

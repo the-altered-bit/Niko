@@ -1,0 +1,5 @@
+set n to 3
+while n is bigger than 0:
+    say n
+    set n to n - 1
+say "Blast off!"

@@ -1,0 +1,6 @@
+set name: text to "Niko"
+set cookies: number to 3
+say name
+say cookies
+set cookies to cookies + 2
+say cookies

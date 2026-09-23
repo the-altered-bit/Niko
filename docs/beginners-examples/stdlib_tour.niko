@@ -1,0 +1,10 @@
+import "stdlib/text.niko" as text
+import "stdlib/math.niko" as math
+import "stdlib/lists.niko" as lists
+import "stdlib/records.niko" as records
+import "stdlib/json.niko" as json
+say text.reverse_text("niko")
+say math.factorial(5)
+say lists.take([1, 2, 3, 4], 2)
+say records.record_keys({"a": 1, "b": 2})
+say json.stringify({"pet": "cat"})

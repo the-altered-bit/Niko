@@ -1,0 +1,2 @@
+to shout with word: text -> text:
+    give back word + "!!!"

@@ -1,0 +1,9 @@
+to greet with name: text:
+    say "Hi,", name
+
+to add with a: number, b: number -> number:
+    give back a + b
+
+greet("Sam")
+greet("Alex")
+say add(20, 22)

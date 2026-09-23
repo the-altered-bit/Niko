@@ -1,0 +1,4 @@
+import "stdlib/text.niko" as text
+say text.reverse_text("niko")
+say text.pad_left("42", 5, "0")
+say text.repeat("ha", 3)

@@ -1,0 +1,6 @@
+to cheer with times: number:
+    for each n in numbers 1 to times:
+        say "Hip hip!"
+
+cheer(3)
+say "Done!"
