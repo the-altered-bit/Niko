@@ -6,148 +6,137 @@
 <title>Niko — A Beginner's Guide (from zero to your first programs)</title>
 <style>
   :root{
-    --paper:#FFF9F0; --ink:#3A2E2A; --soft:#8a7a70;
-    --coral:#FF6B6B; --teal:#2AA198; --sun:#FFC93D; --grape:#7B6FD0;
-    --leaf:#58B368; --sky:#4FA3E3;
-    --card:#FFFFFF; --codebg:#2B2733; --termbg:#211D28;
-    --radius:18px;
+    --bg:#050508; --panel:#0C0C13; --panel2:#12121C;
+    --ink:#E9ECF5; --soft:#9AA3B8;
+    --cyan:#00F0FF; --pink:#FF2E9A; --lime:#B8FF29; --amber:#FFC93D; --purple:#B537F2;
+    --codebg:#08080D; --termbg:#000000;
+    --line:rgba(0,240,255,.22);
+    --radius:14px;
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
   body{
-    margin:0; background:var(--paper); color:var(--ink);
+    margin:0; background:var(--bg); color:var(--ink);
     font-family:"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;
     line-height:1.75; font-size:18px;
+    background-image:radial-gradient(ellipse 90% 45% at 50% -5%, rgba(0,240,255,.08), transparent 70%);
   }
   .wrap{max-width:860px; margin:0 auto; padding:0 22px}
   /* ---------- hero ---------- */
   .hero{
-    background:linear-gradient(135deg,#FFE9C9 0%,#FFD9E8 55%,#D9E8FF 100%);
-    border-bottom:4px dashed #f0c987; padding:56px 0 48px; text-align:center;
+    background:linear-gradient(180deg,#0B0B14 0%,#050508 100%);
+    border-bottom:1px solid var(--line); padding:64px 0 56px; text-align:center;
   }
-  .hero h1{font-size:52px; margin:12px 0 6px; letter-spacing:-1px}
-  .hero h1 .niko-word{color:var(--coral)}
-  .hero p.sub{font-size:21px; color:#6b5b52; max-width:620px; margin:0 auto}
+  .hero h1{font-size:52px; margin:12px 0 6px; letter-spacing:-1px; color:#fff;
+    text-shadow:0 0 28px rgba(0,240,255,.45), 0 0 90px rgba(255,46,154,.18)}
+  .hero h1 .niko-word{color:var(--cyan)}
+  .hero p.sub{font-size:21px; color:var(--soft); max-width:620px; margin:0 auto}
   .badge{
-    display:inline-block; background:#fff; border:2px solid var(--ink);
+    display:inline-block; background:rgba(0,240,255,.08); border:1px solid var(--cyan);
     border-radius:999px; padding:4px 16px; font-weight:700; font-size:15px;
-    box-shadow:3px 3px 0 var(--ink); margin-bottom:8px;
+    color:var(--cyan); margin-bottom:14px; letter-spacing:1.5px; text-transform:uppercase;
+    box-shadow:0 0 18px rgba(0,240,255,.18);
   }
   /* ---------- toc ---------- */
   .toc{
-    background:var(--card); border:3px solid var(--ink); border-radius:var(--radius);
-    box-shadow:6px 6px 0 #f3dfc2; padding:26px 30px; margin:34px 0;
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:0 0 26px rgba(0,240,255,.07); padding:26px 30px; margin:34px 0;
   }
-  .toc h2{margin-top:0}
+  .toc h2{margin-top:0; color:#fff}
   .toc ol{columns:2; column-gap:34px; margin:0; padding-left:22px}
   .toc li{margin:7px 0; break-inside:avoid}
-  .toc a{color:var(--ink); text-decoration:none; border-bottom:2px dotted var(--coral)}
-  .toc a:hover{color:var(--coral)}
+  .toc a{color:var(--ink); text-decoration:none; border-bottom:1px dotted var(--cyan)}
+  .toc a:hover{color:var(--cyan); text-shadow:0 0 12px rgba(0,240,255,.6)}
   @media (max-width:640px){.toc ol{columns:1}}
   /* ---------- sections ---------- */
   section.chapter{margin:54px 0}
   .chnum{
-    display:inline-block; background:var(--sun); border:2px solid var(--ink);
-    border-radius:12px; padding:2px 14px; font-weight:800; font-size:15px;
-    box-shadow:3px 3px 0 var(--ink); margin-bottom:10px;
+    display:inline-block; background:rgba(255,46,154,.10); border:1px solid var(--pink);
+    border-radius:10px; padding:2px 14px; font-weight:800; font-size:14px;
+    color:var(--pink); letter-spacing:1.5px; text-transform:uppercase; margin-bottom:10px;
+    box-shadow:0 0 16px rgba(255,46,154,.15);
   }
-  h2.ch{font-size:34px; margin:6px 0 14px; letter-spacing:-.5px}
-  h3{font-size:23px; margin:30px 0 10px; color:#4a3b33}
+  h2.ch{font-size:34px; margin:6px 0 14px; letter-spacing:-.5px; color:#fff}
+  h3{font-size:23px; margin:30px 0 10px; color:var(--cyan)}
   p{margin:12px 0}
-  /* ---------- mascot tip boxes ---------- */
+  /* ---------- tip boxes ---------- */
   .tip{
-    display:flex; gap:16px; align-items:flex-start;
-    background:#FFF3D6; border:3px solid var(--ink); border-radius:var(--radius);
-    padding:18px 20px; margin:24px 0; box-shadow:5px 5px 0 #f0d9a8;
+    background:var(--panel); border:1px solid rgba(255,201,61,.30); border-left:4px solid var(--amber);
+    border-radius:10px; padding:18px 20px; margin:24px 0;
+    box-shadow:0 0 22px rgba(255,201,61,.05);
   }
-  .tip .face{flex:0 0 64px}
   .tip p{margin:4px 0}
-  .tip b.who{color:#a06a00}
+  .tip b.who{color:var(--amber)}
   .try{
-    background:#E4F7F0; border:3px dashed var(--teal); border-radius:var(--radius);
+    background:rgba(0,240,255,.04); border:1px dashed rgba(0,240,255,.45); border-radius:var(--radius);
     padding:18px 22px; margin:24px 0;
   }
-  .try h4{margin:0 0 6px; color:#14746c}
+  .try h4{margin:0 0 6px; color:var(--cyan)}
   .try p{margin:6px 0}
   /* ---------- code + terminal ---------- */
   .codeblock, .terminal{
-    border-radius:14px; overflow:hidden; margin:20px 0;
-    border:3px solid var(--ink); box-shadow:5px 5px 0 rgba(58,46,42,.18);
+    border-radius:12px; overflow:hidden; margin:20px 0;
+    border:1px solid rgba(0,240,255,.28); box-shadow:0 0 30px rgba(0,240,255,.08);
   }
   .codeblock .bar, .terminal .bar{
     display:flex; align-items:center; gap:8px;
-    padding:9px 14px; font-size:13px; font-weight:700; color:#fff;
+    padding:9px 14px; font-size:13px; font-weight:700; color:#9AA3B8;
   }
-  .codeblock .bar{background:#4a4458}
-  .terminal .bar{background:#17131d}
+  .codeblock .bar{background:#12121D; border-bottom:1px solid rgba(0,240,255,.14)}
+  .terminal .bar{background:#0A0A0A; border-bottom:1px solid rgba(184,255,41,.14)}
   .dot{width:12px;height:12px;border-radius:50%}
   .codeblock pre, .terminal pre{
     margin:0; padding:18px 20px; overflow-x:auto;
     font-family:"Cascadia Code","Fira Code",Consolas,"Courier New",monospace;
     font-size:15.5px; line-height:1.65;
   }
-  .codeblock pre{background:var(--codebg); color:#F5F1E8}
-  .terminal pre{background:var(--termbg); color:#D8F3DC}
-  .terminal .cmd{color:#8CE99A; font-weight:700}
-  .terminal .prompt{color:var(--sun)}
-  .fname{margin-left:auto; opacity:.75; font-weight:400; font-family:monospace}
-  /* niko syntax colors (applied by the tiny highlighter below) */
-  .tok-k{color:#FF8FA3; font-weight:700}
-  .tok-s{color:#FFD93D}
-  .tok-n{color:#8CE99A}
-  .tok-c{color:#8b8496; font-style:italic}
-  .terminal .out-dim{color:#9a93a8}
-  /* ---------- diagrams ---------- */
+  .codeblock pre{background:var(--codebg); color:#E9ECF5}
+  .terminal pre{background:var(--termbg); color:var(--lime); text-shadow:0 0 8px rgba(184,255,41,.35)}
+  .terminal .cmd{color:var(--lime); font-weight:700}
+  .terminal .prompt{color:var(--cyan)}
+  .fname{margin-left:auto; opacity:.55; font-weight:400; font-family:monospace}
+  /* neon syntax colors (applied by the tiny highlighter below) */
+  .tok-k{color:var(--cyan); font-weight:700; text-shadow:0 0 10px rgba(0,240,255,.4)}
+  .tok-s{color:var(--lime)}
+  .tok-n{color:var(--pink)}
+  .tok-c{color:#5B6378; font-style:italic}
+  .terminal .out-dim{color:#5B6378}
+  /* ---------- diagrams: neon line-art on black ---------- */
   figure.diagram{
-    background:var(--card); border:3px solid var(--ink); border-radius:var(--radius);
-    padding:18px; margin:24px 0; text-align:center; box-shadow:5px 5px 0 #ead9f7;
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:18px; margin:24px 0; text-align:center; box-shadow:0 0 26px rgba(0,240,255,.07);
   }
   figure.diagram svg{max-width:100%; height:auto}
+  figure.diagram svg rect, figure.diagram svg circle, figure.diagram svg ellipse{stroke:var(--cyan)}
+  figure.diagram svg path, figure.diagram svg line, figure.diagram svg polyline{stroke:var(--lime)}
+  figure.diagram svg path[fill="none"], figure.diagram svg line{stroke:var(--cyan)}
+  figure.diagram svg text{fill:#EDEFF7}
   figcaption{font-size:15px; color:var(--soft); margin-top:8px}
   /* ---------- misc ---------- */
   .kbd{
-    font-family:monospace; background:#fff; border:2px solid var(--ink);
-    border-bottom-width:4px; border-radius:8px; padding:1px 9px; font-size:15px;
+    font-family:monospace; background:#12121C; border:1px solid rgba(0,240,255,.35);
+    border-radius:6px; padding:1px 9px; font-size:15px; color:var(--cyan);
   }
-  a{color:#c2435a}
+  a{color:var(--cyan)}
   footer{
     margin-top:70px; padding:34px 0 50px; text-align:center; color:var(--soft);
-    border-top:4px dashed #f0c987; font-size:15px;
+    border-top:1px solid var(--line); font-size:15px;
   }
   .next-links{display:flex; gap:14px; flex-wrap:wrap; margin:18px 0}
   .next-links a{
-    flex:1 1 200px; background:#fff; border:3px solid var(--ink); border-radius:14px;
+    flex:1 1 200px; background:var(--panel); border:1px solid var(--line); border-radius:12px;
     padding:14px 16px; text-decoration:none; color:var(--ink); font-weight:600;
-    box-shadow:4px 4px 0 #f3dfc2;
+    transition:border-color .15s, box-shadow .15s, transform .15s;
   }
-  .next-links a:hover{transform:translateY(-2px)}
-  .next-links a b{display:block; font-size:17px}
+  .next-links a:hover{border-color:var(--cyan); box-shadow:0 0 20px rgba(0,240,255,.14); transform:translateY(-2px)}
+  .next-links a b{display:block; font-size:17px; color:#fff}
   .next-links a span{font-weight:400; font-size:15px; color:var(--soft)}
 </style>
 </head>
 <body>
 
-<!-- ======= friendly mascot, defined once and reused ======= -->
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <defs>
-    <g id="niko-face">
-      <circle cx="40" cy="42" r="34" fill="#FFB35C" stroke="#3A2E2A" stroke-width="3"/>
-      <circle cx="28" cy="36" r="7" fill="#fff" stroke="#3A2E2A" stroke-width="2.5"/>
-      <circle cx="52" cy="36" r="7" fill="#fff" stroke="#3A2E2A" stroke-width="2.5"/>
-      <circle cx="29.5" cy="37.5" r="3" fill="#3A2E2A"/>
-      <circle cx="53.5" cy="37.5" r="3" fill="#3A2E2A"/>
-      <path d="M28 54 Q40 63 52 54" fill="none" stroke="#3A2E2A" stroke-width="3" stroke-linecap="round"/>
-      <circle cx="20" cy="48" r="4" fill="#FF8FA3" opacity=".7"/>
-      <circle cx="60" cy="48" r="4" fill="#FF8FA3" opacity=".7"/>
-      <line x1="40" y1="8" x2="40" y2="20" stroke="#3A2E2A" stroke-width="3" stroke-linecap="round"/>
-      <circle cx="40" cy="8" r="5" fill="#FF6B6B" stroke="#3A2E2A" stroke-width="2.5"/>
-    </g>
-  </defs>
-</svg>
-
 <header class="hero">
   <div class="wrap">
-    <svg width="120" height="110" viewBox="0 0 80 84" role="img" aria-label="Niko the guide character"><use href="#niko-face"/></svg>
     <div class="badge">The beginner's guide &mdash; start here</div>
     <h1>Learn <span class="niko-word">Niko</span>,<br>one small step at a time</h1>
     <p class="sub">Niko is a programming language that reads like plain English.
@@ -217,7 +206,6 @@ Niko 2 compiler/interpreter
   into WebAssembly and runs on the page.</p>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> Hi! I'm Niko, your guide. I'll pop up with
     hints as we go. Don't worry about memorizing everything &mdash; programmers
     look things up all the time. The goal is to <i>play</i>.</p>
@@ -240,7 +228,6 @@ Hello, world!
 </pre></div>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> The computer did <i>exactly</i> what you told
     it. That's the whole secret of programming: giving very clear, very small
     instructions. You're already doing it!</p>
@@ -274,14 +261,14 @@ Niko
 
   <figure class="diagram">
     <svg width="520" height="150" viewBox="0 0 520 150" role="img" aria-label="Diagram: a variable is a labelled box holding a value">
-      <rect x="30" y="30" width="200" height="90" rx="14" fill="#FFF3D6" stroke="#3A2E2A" stroke-width="3"/>
-      <text x="130" y="58" text-anchor="middle" font-size="17" font-weight="700" fill="#3A2E2A">name</text>
-      <line x1="30" y1="70" x2="230" y2="70" stroke="#3A2E2A" stroke-width="2"/>
-      <text x="130" y="103" text-anchor="middle" font-size="19" fill="#3A2E2A">"Sam"</text>
-      <rect x="290" y="30" width="200" height="90" rx="14" fill="#E4F7F0" stroke="#3A2E2A" stroke-width="3"/>
-      <text x="390" y="58" text-anchor="middle" font-size="17" font-weight="700" fill="#3A2E2A">score</text>
-      <line x1="290" y1="70" x2="490" y2="70" stroke="#3A2E2A" stroke-width="2"/>
-      <text x="390" y="103" text-anchor="middle" font-size="19" fill="#3A2E2A">7</text>
+      <rect x="30" y="30" width="200" height="90" rx="14" fill="#161106" stroke="#DDE4F5" stroke-width="3"/>
+      <text x="130" y="58" text-anchor="middle" font-size="17" font-weight="700" fill="#DDE4F5">name</text>
+      <line x1="30" y1="70" x2="230" y2="70" stroke="#DDE4F5" stroke-width="2"/>
+      <text x="130" y="103" text-anchor="middle" font-size="19" fill="#DDE4F5">"Sam"</text>
+      <rect x="290" y="30" width="200" height="90" rx="14" fill="#071410" stroke="#DDE4F5" stroke-width="3"/>
+      <text x="390" y="58" text-anchor="middle" font-size="17" font-weight="700" fill="#DDE4F5">score</text>
+      <line x1="290" y1="70" x2="490" y2="70" stroke="#DDE4F5" stroke-width="2"/>
+      <text x="390" y="103" text-anchor="middle" font-size="19" fill="#DDE4F5">7</text>
     </svg>
     <figcaption>Two variables: a box called <b>name</b> holding "Sam", and a box called <b>score</b> holding 7.</figcaption>
   </figure>
@@ -297,7 +284,6 @@ say cookies</pre></div>
 </pre></div>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> Variable names can't have spaces &mdash; use
     one word like <span class="kbd">high_score</span> or <span class="kbd">playerName</span>.
     Pick names that explain themselves. Future-you will say thanks.</p>
@@ -337,7 +323,6 @@ How old are you? In 5 years you will be 35
 </pre></div>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> If the human types something that isn't a
     number when you used <span class="kbd">ask number</span>, Niko will ask again
     nicely. It won't crash &mdash; it just waits for a proper number.</p>
@@ -345,15 +330,15 @@ How old are you? In 5 years you will be 35
 
   <figure class="diagram">
     <svg width="520" height="120" viewBox="0 0 520 120" role="img" aria-label="Diagram: ask sends a question to the human and the answer comes back into a variable">
-      <rect x="20" y="25" width="170" height="70" rx="30" fill="#D9E8FF" stroke="#3A2E2A" stroke-width="3"/>
-      <text x="105" y="66" text-anchor="middle" font-size="16" fill="#3A2E2A">computer</text>
-      <rect x="330" y="25" width="170" height="70" rx="30" fill="#FFE9C9" stroke="#3A2E2A" stroke-width="3"/>
-      <text x="415" y="66" text-anchor="middle" font-size="16" fill="#3A2E2A">human</text>
-      <path d="M195 45 L325 45" stroke="#3A2E2A" stroke-width="3" marker-end="url(#ah)"/>
-      <text x="260" y="35" text-anchor="middle" font-size="14" fill="#3A2E2A">"Your name?"</text>
-      <path d="M325 75 L195 75" stroke="#3A2E2A" stroke-width="3" marker-end="url(#ah)"/>
-      <text x="260" y="100" text-anchor="middle" font-size="14" fill="#3A2E2A">"Sam" &#x2192; name</text>
-      <defs><marker id="ah" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="none" stroke="#3A2E2A" stroke-width="2"/></marker></defs>
+      <rect x="20" y="25" width="170" height="70" rx="30" fill="#081019" stroke="#DDE4F5" stroke-width="3"/>
+      <text x="105" y="66" text-anchor="middle" font-size="16" fill="#DDE4F5">computer</text>
+      <rect x="330" y="25" width="170" height="70" rx="30" fill="#161006" stroke="#DDE4F5" stroke-width="3"/>
+      <text x="415" y="66" text-anchor="middle" font-size="16" fill="#DDE4F5">human</text>
+      <path d="M195 45 L325 45" stroke="#DDE4F5" stroke-width="3" marker-end="url(#ah)"/>
+      <text x="260" y="35" text-anchor="middle" font-size="14" fill="#DDE4F5">"Your name?"</text>
+      <path d="M325 75 L195 75" stroke="#DDE4F5" stroke-width="3" marker-end="url(#ah)"/>
+      <text x="260" y="100" text-anchor="middle" font-size="14" fill="#DDE4F5">"Sam" &#x2192; name</text>
+      <defs><marker id="ah" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="none" stroke="#DDE4F5" stroke-width="2"/></marker></defs>
     </svg>
     <figcaption><span class="kbd">ask</span> is a conversation: a question goes out, an answer comes back.</figcaption>
   </figure>
@@ -380,19 +365,19 @@ You got a perfect score!
 
   <figure class="diagram">
     <svg width="520" height="220" viewBox="0 0 520 220" role="img" aria-label="Flowchart: if the test is true go one way, otherwise go the other way">
-      <rect x="200" y="8" width="120" height="40" rx="10" fill="#FFF3D6" stroke="#3A2E2A" stroke-width="3"/>
-      <text x="260" y="34" text-anchor="middle" font-size="15" fill="#3A2E2A">score is 10?</text>
-      <path d="M260 48 L260 80" stroke="#3A2E2A" stroke-width="3"/>
-      <polygon points="260,80 180,140 260,200 340,140" fill="#fff" stroke="#3A2E2A" stroke-width="3"/>
-      <text x="260" y="146" text-anchor="middle" font-size="14" fill="#3A2E2A">yes?</text>
-      <path d="M180 140 L70 140 L70 200" stroke="#3A2E2A" stroke-width="3" fill="none"/>
-      <path d="M340 140 L450 140 L450 200" stroke="#3A2E2A" stroke-width="3" fill="none"/>
-      <rect x="20" y="185" width="100" height="32" rx="8" fill="#E4F7F0" stroke="#3A2E2A" stroke-width="2.5"/>
-      <text x="70" y="207" text-anchor="middle" font-size="13" fill="#3A2E2A">"You win!"</text>
-      <rect x="400" y="185" width="100" height="32" rx="8" fill="#FFE1E1" stroke="#3A2E2A" stroke-width="2.5"/>
-      <text x="450" y="207" text-anchor="middle" font-size="13" fill="#3A2E2A">"Try again"</text>
-      <text x="150" y="132" font-size="13" fill="#3A2E2A">yes &#x2192;</text>
-      <text x="352" y="132" font-size="13" fill="#3A2E2A">&#x2190; no</text>
+      <rect x="200" y="8" width="120" height="40" rx="10" fill="#161106" stroke="#DDE4F5" stroke-width="3"/>
+      <text x="260" y="34" text-anchor="middle" font-size="15" fill="#DDE4F5">score is 10?</text>
+      <path d="M260 48 L260 80" stroke="#DDE4F5" stroke-width="3"/>
+      <polygon points="260,80 180,140 260,200 340,140" fill="#0D0D15" stroke="#DDE4F5" stroke-width="3"/>
+      <text x="260" y="146" text-anchor="middle" font-size="14" fill="#DDE4F5">yes?</text>
+      <path d="M180 140 L70 140 L70 200" stroke="#DDE4F5" stroke-width="3" fill="none"/>
+      <path d="M340 140 L450 140 L450 200" stroke="#DDE4F5" stroke-width="3" fill="none"/>
+      <rect x="20" y="185" width="100" height="32" rx="8" fill="#071410" stroke="#DDE4F5" stroke-width="2.5"/>
+      <text x="70" y="207" text-anchor="middle" font-size="13" fill="#DDE4F5">"You win!"</text>
+      <rect x="400" y="185" width="100" height="32" rx="8" fill="#160A0E" stroke="#DDE4F5" stroke-width="2.5"/>
+      <text x="450" y="207" text-anchor="middle" font-size="13" fill="#DDE4F5">"Try again"</text>
+      <text x="150" y="132" font-size="13" fill="#DDE4F5">yes &#x2192;</text>
+      <text x="352" y="132" font-size="13" fill="#DDE4F5">&#x2190; no</text>
     </svg>
     <figcaption>An <span class="kbd">if</span> is a fork in the road. The program checks the question, then takes exactly one path.</figcaption>
   </figure>
@@ -412,7 +397,6 @@ Halfway there!
 </pre></div>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> Notice the words Niko uses for comparing:
     <span class="kbd">is</span>, <span class="kbd">is smaller than</span>,
     <span class="kbd">is bigger than</span>. Say the line out loud &mdash; if it
@@ -467,12 +451,12 @@ Blast off!
 
   <figure class="diagram">
     <svg width="520" height="170" viewBox="0 0 520 170" role="img" aria-label="Diagram: a loop goes round in a circle until the stop test is true">
-      <path d="M260 25 m -55 0 a 55 55 0 1 1 -8 109" fill="none" stroke="#7B6FD0" stroke-width="6" stroke-linecap="round"/>
-      <polygon points="197,120 210,140 222,118" fill="#7B6FD0"/>
-      <rect x="215" y="60" width="90" height="40" rx="10" fill="#fff" stroke="#3A2E2A" stroke-width="3"/>
-      <text x="260" y="86" text-anchor="middle" font-size="15" fill="#3A2E2A">do the block</text>
-      <text x="360" y="70" font-size="15" fill="#3A2E2A">&#x2190; round again...</text>
-      <text x="360" y="95" font-size="15" fill="#3A2E2A">...until the test says stop</text>
+      <path d="M260 25 m -55 0 a 55 55 0 1 1 -8 109" fill="none" stroke="#B537F2" stroke-width="6" stroke-linecap="round"/>
+      <polygon points="197,120 210,140 222,118" fill="#B537F2"/>
+      <rect x="215" y="60" width="90" height="40" rx="10" fill="#0D0D15" stroke="#DDE4F5" stroke-width="3"/>
+      <text x="260" y="86" text-anchor="middle" font-size="15" fill="#DDE4F5">do the block</text>
+      <text x="360" y="70" font-size="15" fill="#DDE4F5">&#x2190; round again...</text>
+      <text x="360" y="95" font-size="15" fill="#DDE4F5">...until the test says stop</text>
     </svg>
     <figcaption>A loop is a circle: do the block, check the test, round again &mdash; until it's time to stop.</figcaption>
   </figure>
@@ -493,7 +477,6 @@ Blast off!
 </pre></div>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> Careful with <span class="kbd">while</span>:
     if the thing you're waiting for never happens, the loop spins <i>forever</i>
     and you'll have to stop the program yourself. Always make sure something
@@ -533,14 +516,14 @@ Hi, Alex
 
   <figure class="diagram">
     <svg width="520" height="150" viewBox="0 0 520 150" role="img" aria-label="Diagram: a function is a machine — values go in, a result comes out">
-      <rect x="180" y="35" width="160" height="80" rx="16" fill="#D9E8FF" stroke="#3A2E2A" stroke-width="3"/>
-      <text x="260" y="66" text-anchor="middle" font-size="16" font-weight="700" fill="#3A2E2A">greet</text>
-      <text x="260" y="92" text-anchor="middle" font-size="13" fill="#3A2E2A">the machine</text>
-      <path d="M60 75 L175 75" stroke="#3A2E2A" stroke-width="3" marker-end="url(#ah2)"/>
-      <text x="115" y="60" text-anchor="middle" font-size="14" fill="#3A2E2A">"Sam" goes in</text>
-      <path d="M345 75 L460 75" stroke="#3A2E2A" stroke-width="3" marker-end="url(#ah2)"/>
-      <text x="405" y="60" text-anchor="middle" font-size="14" fill="#3A2E2A">words come out</text>
-      <defs><marker id="ah2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="none" stroke="#3A2E2A" stroke-width="2"/></marker></defs>
+      <rect x="180" y="35" width="160" height="80" rx="16" fill="#081019" stroke="#DDE4F5" stroke-width="3"/>
+      <text x="260" y="66" text-anchor="middle" font-size="16" font-weight="700" fill="#DDE4F5">greet</text>
+      <text x="260" y="92" text-anchor="middle" font-size="13" fill="#DDE4F5">the machine</text>
+      <path d="M60 75 L175 75" stroke="#DDE4F5" stroke-width="3" marker-end="url(#ah2)"/>
+      <text x="115" y="60" text-anchor="middle" font-size="14" fill="#DDE4F5">"Sam" goes in</text>
+      <path d="M345 75 L460 75" stroke="#DDE4F5" stroke-width="3" marker-end="url(#ah2)"/>
+      <text x="405" y="60" text-anchor="middle" font-size="14" fill="#DDE4F5">words come out</text>
+      <defs><marker id="ah2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="none" stroke="#DDE4F5" stroke-width="2"/></marker></defs>
     </svg>
     <figcaption>A function is a little machine: values go in, work happens, a result can come back out with <span class="kbd">give back</span>.</figcaption>
   </figure>
@@ -551,7 +534,6 @@ Hi, Alex
   "this function gives back a number."</p>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> If you copy-paste the same code three times,
     that's a function begging to be born. Give it a name, teach it once, call it
     everywhere. Your programs get shorter <i>and</i> easier to understand.</p>
@@ -595,7 +577,6 @@ I love my hamster
 </pre></div>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> Counting starts at <b>1</b> in Niko, not 0!
     The first item is <span class="kbd">1 of my_list</span>, the second is
     <span class="kbd">2 of my_list</span>. It matches how humans count &mdash;
@@ -630,12 +611,12 @@ Age: 2
 
   <figure class="diagram">
     <svg width="520" height="150" viewBox="0 0 520 150" role="img" aria-label="Diagram: a record bundles labelled fields together">
-      <rect x="110" y="20" width="300" height="110" rx="16" fill="#FFE9C9" stroke="#3A2E2A" stroke-width="3"/>
-      <text x="260" y="48" text-anchor="middle" font-size="16" font-weight="700" fill="#3A2E2A">person</text>
-      <line x1="110" y1="60" x2="410" y2="60" stroke="#3A2E2A" stroke-width="2"/>
-      <text x="130" y="88" font-size="15" fill="#3A2E2A">name &#x2192; "Ada"</text>
-      <text x="130" y="114" font-size="15" fill="#3A2E2A">age &#x2192; 36</text>
-      <text x="290" y="88" font-size="15" fill="#3A2E2A">pet &#x2192; "cat"</text>
+      <rect x="110" y="20" width="300" height="110" rx="16" fill="#161006" stroke="#DDE4F5" stroke-width="3"/>
+      <text x="260" y="48" text-anchor="middle" font-size="16" font-weight="700" fill="#DDE4F5">person</text>
+      <line x1="110" y1="60" x2="410" y2="60" stroke="#DDE4F5" stroke-width="2"/>
+      <text x="130" y="88" font-size="15" fill="#DDE4F5">name &#x2192; "Ada"</text>
+      <text x="130" y="114" font-size="15" fill="#DDE4F5">age &#x2192; 36</text>
+      <text x="290" y="88" font-size="15" fill="#DDE4F5">pet &#x2192; "cat"</text>
     </svg>
     <figcaption>A record keeps related facts together, each with its own name tag.</figcaption>
   </figure>
@@ -678,7 +659,6 @@ hahaha
 </pre></div>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> The full toy box is listed in
     <span class="kbd">STDLIB.md</span> in the Niko folder. Whenever you think
     "someone must have already solved this" &mdash; look there first!</p>
@@ -741,7 +721,6 @@ Niko error in oops.niko: Line 2: can only concatenate str (not &quot;int&quot;) 
   <b>3. What did the computer expect?</b> The rest of the message is a hint.</p>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> My debugging ritual: <b>read</b> the message,
     <b>find</b> the line, <b>fix one thing</b>, run again. Never change five things
     at once &mdash; then you won't know which change helped!</p>
@@ -772,7 +751,6 @@ hooray!!!
 </pre></div>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> <span class="kbd">use</span> is for <i>your</i>
     files. <span class="kbd">import</span> (which you met in Chapter 10) is for the
     built-in toy boxes like <span class="kbd">stdlib/text.niko</span>. Same idea,
@@ -811,7 +789,6 @@ okin
   </div>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> You don't need to memorize the toy box. Just
     remember it <i>exists</i>. When you need something, peek inside &mdash; that's
     what it's for.</p>
@@ -858,7 +835,6 @@ Done!
 </pre></div>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> For this book, <span class="kbd">niko2 run</span>
     is all you need. The other two are there when you're curious &mdash; or when
     you want your program to live on the web or run super fast.</p>
@@ -956,7 +932,6 @@ Your score: 1 out of 2
   </div>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> You just built three real programs! Not
     "examples" &mdash; <i>programs</i>. The guessing game, the todo list, the quiz:
     these are the same ideas behind apps people use every day. You're thinking
@@ -986,7 +961,6 @@ Your score: 1 out of 2
   &#x1F4CA; A grade calculator &mdash; ask for scores, say the average and a letter grade.</p>
 
   <div class="tip">
-    <svg class="face" width="64" height="68" viewBox="0 0 80 84"><use href="#niko-face"/></svg>
     <p><b class="who">Niko says:</b> The best way to learn programming is to build
     something <i>you</i> want to exist. Pick the idea above that made you smile
     and start. When you get stuck (you will &mdash; everyone does), re-read
@@ -998,7 +972,6 @@ Your score: 1 out of 2
 
 <footer>
   <div class="wrap">
-    <svg width="72" height="76" viewBox="0 0 80 84" role="img" aria-label="Niko waving goodbye"><use href="#niko-face"/></svg>
     <p><b>The Niko Beginner's Guide</b> &mdash; written with care for curious humans of all ages.<br>
     Every example in this book was run for real. If one misbehaves on your machine, that's a bug &mdash; tell us!<br>
     Keep going: <a href="niko-guide.html">the deeper guide</a> is waiting when you're ready.</p>
