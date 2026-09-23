@@ -537,72 +537,24 @@ detected by `niko2 migrate`.
    boolean position, but this was not confirmed differentially -- it
    needs a dedicated probe before it can be documented as fact.
 
-## Native: `otherwise if` with a temp-emitting condition miscompiles (Alpha 36, 2026-09-23)
+## Native: `otherwise if` with a temp-emitting condition miscompiled (Alpha 36, fixed in Alpha 38, 2026-09-23)
 
 Found by the `niko2 fuzz` differential campaign on its first real run
-(seed 20260923, case 10). Minimal repro:
+(seed 20260923, case 10). The native backend's `IfStmt` codegen called
+`gen_expr(cond)` *before* emitting the `else if` line, so temp-variable
+statements landed between the previous branch's closing `}` and the
+`else if` -- invalid C (`'else' without a previous 'if'`). Worse, the
+`and`/`or` lowering's own `if (!t) { t = rhs; }` captured the chain's
+`else if` (dangling else) and silently ran the wrong branch.
 
-```
-if 1 is 1:
-    say 1
-otherwise if length([1, 2]) is 2:
-    say 2
-otherwise:
-    say 3
-```
-
-VM and WASM print `1`, rc=0. The native backend's C does not compile:
-
-```
-prog.c:19:5: error: 'else' without a previous 'if'
-   19 |     else if (nval_truthy(nval_binary(3, 6, b_length(3, t_2), nval_number(2)))) {
-```
-
-Root cause (`niko2/backends/native.py`, `IfStmt` in `gen_stmt`): the
-condition is compiled with `c = self.gen_expr(cond)`, and `gen_expr`
-emits temp-variable assignment *statements* as a side effect. Those
-statements land in the output stream between the previous branch's
-closing `}` and the `else if` line, which is invalid C (`else` must
-directly follow `}`). Any `otherwise if` whose condition needs temps
-fails this way (`has({...}, ...)`, `length([...]) is ...`, ...); plain
-conditions (`2 is 2`, `starts_with("ab", "a")` with constant args) work,
-and a leading `if` with a temp-emitting condition is fine -- only
-`otherwise if` breaks. Larger programs additionally show `undeclared`
-temp errors cascading from the broken brace structure.
-
-Worse, the campaign's native characterization (seed 201) showed the
-same root cause can produce *valid* C that silently takes the wrong
-branch. Minimal repro:
-
-```
-set c12 to 0
-while c12 is smaller than 1:
-    set c12 to c12 + 1
-    if not (no):
-        say "first"
-    otherwise if not (yes):
-        say "second"
-    otherwise if [607, 65, c12, c12] or "naïve café":
-        say nothing, length([c12, c12, 820, -673]) is smaller than number("3.5")
-    otherwise:
-        say "fourth"
-    say c12
-```
-
-VM/WASM print `first` / `1`; native prints `first` / `nothing no` / `1`.
-The `or` in the third condition is lowered to its own `if (!t) { t =
-rhs; }`, and the chain's `else if (t)` / `else` attach to *that* inner
-`if` instead of the outer chain -- so after the first branch runs, the
-third condition's temps still execute and its body runs too. This is
-the dangerous half of the bug: not a loud compile error but wrong
-control flow at runtime.
-
-Not fixed in Alpha 36 (beyond the drive-by budget; the correct fix
-nests each subsequent condition inside the previous `else { ... }`
-block so temps are emitted in a legal position and short-circuit
-evaluation is preserved). The fuzzer's committed smoke test
-(`tests/test_fuzz.py`) runs VM+WASM only until this is fixed; campaign
-runs include native and bucket these failures by signature.
+Fixed in Alpha 38: `_gen_if_chain` in `niko2/backends/native.py` nests
+each branch after the first inside the previous branch's `else { ... }`
+block, so temps land legally and the dangling-else capture is
+impossible; conditions still evaluate lazily in order. Regression
+proof: `tests/test_native_otherwise.py` (13 three-way differential
+cases, both original repros included). `tests/test_fuzz.py` runs native
+again (sampled 1-in-10). See `RELEASE_NOTES_ALPHA38.md` /
+`ALPHA38_DESIGN.md`.
 
 ## `ask` past stdin EOF diverges across backends (Alpha 36, 2026-09-23)
 

@@ -537,20 +537,7 @@ class NikoCCompiler:
         elif isinstance(n, ExprStmt):
             self._emit(f'(void){self.gen_expr(n.expr)};')
         elif isinstance(n, IfStmt):
-            first = True
-            for cond, body in n.branches:
-                kw = 'if' if first else 'else if'
-                first = False
-                c = self.gen_expr(cond)
-                self._emit(f'{kw} (nval_truthy({c})) {{')
-                for s in body:
-                    self.gen_stmt(s)
-                self._emit('}')
-            if n.otherwise:
-                self._emit('else {')
-                for s in n.otherwise:
-                    self.gen_stmt(s)
-                self._emit('}')
+            self._gen_if_chain(n.branches, n.otherwise)
         elif isinstance(n, RepeatStmt):
             c = self.gen_expr(n.count)
             tc, ti = self._tmp(), self._tmp()
@@ -612,6 +599,38 @@ class NikoCCompiler:
         else:
             raise CompileError(f"the native backend can't compile "
                                f"{type(n).__name__} yet", line=line)
+
+    def _gen_if_chain(self, branches, otherwise):
+        # Alpha 38: each branch after the first is nested inside the
+        # previous branch's `else { ... }` block rather than emitted as a
+        # flat `else if`. gen_expr may emit temp-variable *statements* as a
+        # side effect (list/record construction, the and/or lowering's own
+        # `if (...) { t = ...; }`); on a flat chain those statements land
+        # between the previous branch's closing `}` and the `else if`,
+        # which is invalid C ('else' without a previous 'if'), and the
+        # and/or lowering's inner `if` would capture the `else if`
+        # (dangling else) and silently take the wrong branch. Nested, the
+        # temps land legally inside the else block, and conditions still
+        # evaluate lazily in order, so short-circuit semantics are
+        # preserved exactly.
+        if not branches:
+            if otherwise:
+                self._emit('{')
+                for s in otherwise:
+                    self.gen_stmt(s)
+                self._emit('}')
+            return
+        (cond, body), rest = branches[0], branches[1:]
+        c = self.gen_expr(cond)
+        self._emit(f'if (nval_truthy({c})) {{')
+        for s in body:
+            self.gen_stmt(s)
+        if rest or otherwise:
+            self._emit('} else {')
+            self._gen_if_chain(rest, otherwise)
+            self._emit('}')
+        else:
+            self._emit('}')
 
     def _gen_nested_def(self, n):
         """A `to` statement: build the env list of shared cells for the

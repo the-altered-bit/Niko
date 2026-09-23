@@ -264,18 +264,20 @@ niko2 fuzz --seed 1 --cases 1000            # generate + compare (seed always pr
 niko2 fuzz --backend vm,wasm                # subset of backends
 niko2 fuzz --native-sample 10               # native only on every 10th case (it's ~3s/compile)
 niko2 fuzz --corpus fuzz_failures           # re-run saved cases (regression set)
+niko2 fuzz --if-bias --cases 3000           # bias toward otherwise-if chains (Alpha 38)
 ```
 
 Exit 0 when every case agrees, 1 on divergences, 2 on usage errors.
 The final campaign (5,000 cases, VM vs WASM) was fully green; the
 bug-finding runs surfaced seven real backend bugs now in
-`niko2/KNOWN_LIMITATIONS.md`: the native backend miscompiles
+`niko2/KNOWN_LIMITATIONS.md`: the native backend miscompiling
 `otherwise if` with a temp-emitting condition (invalid C, plus a silent
-wrong-branch variant), `ask` past stdin EOF diverges three ways (VM
-errors, WASM/native yield `""` for text, both compiled backends hang on
-`ask number`), `error_message(try_number(bad-text))` differs VM-vs-WASM,
+wrong-branch variant — **fixed in Alpha 38**), `ask` past stdin EOF
+diverges three ways (VM errors, WASM/native yield `""` for text, both
+compiled backends hang on `ask number`),
+`error_message(try_number(bad-text))` differs VM-vs-WASM,
 native skips re-printing the prompt on `ask number` retry, `stop` out of
-`repeat`/`for each` leaks the VM's loop iterator, and comparing
-`yes`/`no` with numbers diverges across backends. None fixed this sprint;
-the fuzzer avoids each class by construction. See
+`repeat`/`for each` leaking the VM's loop iterator (**fixed in Alpha
+37**), and comparing `yes`/`no` with numbers diverges across backends.
+The fuzzer avoids each open class by construction. See
 `RELEASE_NOTES_ALPHA36.md` / `ALPHA36_DESIGN.md`.

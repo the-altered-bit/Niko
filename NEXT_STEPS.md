@@ -662,3 +662,24 @@ triaged to the known native `otherwise if` / `ask number` issues).
 suite green (402 pytest + `tests/test_stop.py`'s 31 cases, 26 Niko 1,
 16 Niko 2 + nikoir round trip).
 See `RELEASE_NOTES_ALPHA37.md` / `ALPHA37_DESIGN.md`.
+
+## Alpha 38 (complete, 2026-09-23): native `otherwise if` miscompile fix
+
+Fixed the scariest remaining bug from the Alpha 36 fuzz campaign: the
+native backend miscompiled `otherwise if` chains whose conditions needed
+temp variables — either emitting invalid C (`'else' without a previous
+'if'`, because temp statements landed between `}` and `else if`) or,
+worse, silently taking the wrong branch (the `and`/`or` lowering's inner
+`if` captured the chain's `else if` via dangling else). New
+`_gen_if_chain` in `niko2/backends/native.py` nests each branch after
+the first inside the previous `else { ... }` block; conditions still
+evaluate lazily in order, so short-circuit semantics are unchanged.
+New `tests/test_native_otherwise.py` (13 three-way differential cases,
+both fuzzer repros included; the native leg asserts the C compiles).
+Fuzzer follow-up: new `--if-bias` flag (`Gen(if_bias=...)`) for focused
+campaigns over deep `otherwise if` chains; focused campaign of 3,000
+cases across all three backends — 3,000 `--if-bias` cases (seeds 3801-3804, all three backends, native sampled 1-in-10): 2,995 pass, 5 failures -- all 5 triaged to the documented native `ask number` re-prompt divergence (out of scope); zero `otherwise if` divergences, zero invalid-C emissions, zero hangs. `tests/test_fuzz.py`
+smoke test runs native again (sampled 1-in-10; was excluded pending
+this fix). `KNOWN_LIMITATIONS.md` entry rewritten as
+fixed-in-Alpha-38. Full suite green 402 pytest + `tests/test_native_otherwise.py`'s 13 three-way cases, 26 Niko 1, 16 Niko 2 + nikoir round trip.
+See `RELEASE_NOTES_ALPHA38.md` / `ALPHA38_DESIGN.md`.

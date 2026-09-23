@@ -9,7 +9,7 @@ bytes exactly. Any disagreement is a failure: the program is shrunk
 Usage:
     niko2 fuzz [--seed N] [--cases N] [--backend vm,wasm,native]
                [--timeout SEC] [--native-sample N] [--keep-passing]
-               [--no-minimize]
+               [--no-minimize] [--if-bias]
     niko2 fuzz --corpus DIR        # re-run saved *.niko cases (regression set)
 
 Exit codes: 0 = every case agreed on all backends, 1 = divergences found,
@@ -115,9 +115,12 @@ class Gen:
     indexing).
     """
 
-    def __init__(self, seed):
+    def __init__(self, seed, if_bias=0):
         self.rng = random.Random(seed)
         self.seed = seed
+        self.if_bias = if_bias  # >0: gen_if emits more `otherwise if`
+        # branches (focused campaigns, e.g. Alpha 38's native otherwise-if
+        # fix verification). 0 = default distribution.
         self.reset()
 
     def reset(self):
@@ -341,8 +344,9 @@ class Gen:
         lines += self.gen_block(self.rng.randint(1, 3), indent + 1,
                                 top=False, in_loop=in_loop, in_func=in_func,
                                 depth=depth)
-        for _ in range(self.rng.randint(0, 2)):
-            if self.rng.random() < 0.7:
+        for _ in range(self.rng.randint(1, 4) if self.if_bias
+                       else self.rng.randint(0, 2)):
+            if self.rng.random() < (0.95 if self.if_bias else 0.7):
                 lines.append(pad + f"otherwise if {self.gen_expr(('bool',), 3)}:")
                 lines += self.gen_block(self.rng.randint(1, 3), indent + 1,
                                         top=False, in_loop=in_loop,
@@ -1348,9 +1352,9 @@ def generate_valid(gen, max_attempts=60):
 
 
 def run_cases(backends, cases, seed, timeout, native_sample, keep_passing,
-              minimize_on, progress_every=50):
+              minimize_on, progress_every=50, if_bias=0):
     import tempfile
-    gen = Gen(seed)
+    gen = Gen(seed, if_bias=if_bias)
     tally = {"pass": 0, "known": 0, "fail": 0, "reject": 0,
              "known_names": {}}
     failures = []
@@ -1501,7 +1505,7 @@ def main(a):
           f"timeout {a.timeout}s")
     tally, failures = run_cases(backends, cases, seed, a.timeout,
                                 a.native_sample, a.keep_passing,
-                                not a.no_minimize)
+                                not a.no_minimize, if_bias=a.if_bias)
     print(f"niko2 fuzz: done seed={seed} cases={cases} "
           f"pass={tally['pass']} known-divergence={tally['known']} "
           f"{tally['known_names']} fail={tally['fail']} "

@@ -31,15 +31,15 @@ CASES = 20
 
 
 def _backends():
-    # VM + WASM only. Native is excluded from the committed smoke test
-    # until the `otherwise if` codegen bug is fixed (KNOWN_LIMITATIONS.md,
-    # "Native: `otherwise if` with a temp-emitting condition miscompiles"):
-    # the generator routinely emits that construct and native rc=1s on it,
-    # which would make this test red for a backend bug, not a fuzzer bug.
-    # Campaign runs (ALPHA36_DESIGN.md) do include native, sampled.
+    # VM + WASM always; native included when a C compiler is on PATH.
+    # (Alpha 36 excluded native pending the `otherwise if` codegen fix;
+    # Alpha 38 fixed it, so native is back, sampled 1-in-10 to keep CI
+    # fast -- a full native compile costs ~3s per case.)
     bs = ["vm"]
     if shutil.which("node"):
         bs.append("wasm")
+    if shutil.which("cc") or shutil.which("gcc") or shutil.which("clang"):
+        bs.append("native")
     return bs
 
 
@@ -54,7 +54,7 @@ def test_fuzz_smoke_campaign_agrees():
     backends = _backends()
     tally, failures = fuzz_mod.run_cases(
         backends, CASES, SEED, timeout=15,
-        native_sample=1, keep_passing=False,
+        native_sample=10, keep_passing=False,
         minimize_on=False, progress_every=1000)
     assert tally["reject"] == 0, f"generator reject: {tally}"
     assert not failures, f"divergences: {failures[:3]}"

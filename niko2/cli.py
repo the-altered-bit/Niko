@@ -212,6 +212,7 @@ def main():
     ap.add_argument('--keep-passing',action='store_true',help='(fuzz) save passing programs to fuzz_corpus/')
     ap.add_argument('--no-minimize',action='store_true',help='(fuzz) skip the shrink pass on failures')
     ap.add_argument('--corpus',default=None,help='(fuzz) re-run saved *.niko cases instead of generating')
+    ap.add_argument('--if-bias',action='store_true',help='(fuzz) bias the generator toward otherwise-if chains')
     # Argparse quirk (pre-existing): with two nargs='?' positionals, an
     # option sitting between them breaks parsing, so `niko2 get --update
     # <name>` would die as "unrecognized arguments". Hoist --update out
