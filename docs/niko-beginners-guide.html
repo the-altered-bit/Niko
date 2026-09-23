@@ -201,6 +201,21 @@ Niko 2 compiler/interpreter
 
   <p>If you see that list, you're ready. Every example in this book runs with
   <span class="kbd">python3 -m niko2 run myfile.niko</span>.</p>
+
+  <h3>What's inside the folder?</h3>
+  <p>Unzipping gives you a folder full of files. Here is the map &mdash; the four
+  places that matter to you:</p>
+
+  <div class="codeblock"><div class="bar"><span class="dot" style="background:#FF6B6B"></span><span class="dot" style="background:#FFC93D"></span><span class="dot" style="background:#58B368"></span><span class="fname">folder map</span></div><pre>Niko-v2.0/
+&#9500;&#9472;&#9472; niko2/                        &#8592; the tool itself &mdash; you run this
+&#9500;&#9472;&#9472; docs/
+&#9474;   &#9500;&#9472;&#9472; niko-beginners-guide.html  &#8592; this book
+&#9474;   &#9492;&#9472;&#9472; beginners-examples/       &#8592; every example, ready to run
+&#9500;&#9472;&#9472; examples/                     &#8592; extra sample programs
+&#9492;&#9472;&#9472; tests/                        &#8592; how Niko checks itself</pre></div>
+
+  <p><span class="kbd">niko2/</span> is the language. <span class="kbd">docs/beginners-examples/</span>
+  is your playground &mdash; open any file there, read it, run it, change it, break it.</p>
   <p><b>Way 3 &mdash; the playground.</b> There is a Niko playground that runs
   right in your web browser &mdash; nothing to install at all. Your code is turned
   into WebAssembly and runs on the page.</p>
@@ -952,6 +967,25 @@ Your score: 1 out of 2
     <a href="#"><b>&#x1F4E6; niko2 get</b><span>The package manager &mdash; share your code and borrow other people's packages</span></a>
     <a href="#"><b>&#x2728; niko2 fmt</b><span>The formatter &mdash; makes your code tidy automatically</span></a>
   </div>
+
+  <h3>All the examples, ready to run</h3>
+  <p>Every program in this book lives in the <span class="kbd">docs/beginners-examples/</span>
+  folder. Take a look inside:</p>
+
+  <div class="terminal"><div class="bar"><span class="dot" style="background:#FF6B6B"></span><span class="dot" style="background:#FFC93D"></span><span class="dot" style="background:#58B368"></span>terminal</div><pre><span class="prompt">$</span> <span class="cmd">ls docs/beginners-examples</span>
+ask_age.niko      decisions.niko  for_each.niko   hello.niko
+ask_name.niko     decisions_chain.niko  functions.niko  lists.niko
+backends.niko     game_guess.niko  math.niko       oops.niko
+quiz.niko         records.niko    repeat_loop.niko  stdlib_tour.niko
+stop_skip.niko    text_tricks.niko  text_tricks2.niko  todo.niko
+use_demo          variables.niko  while_loop.niko
+</pre></div>
+
+  <p>Each file is named after its chapter. Run any of them straight from the folder:</p>
+
+  <div class="terminal"><div class="bar"><span class="dot" style="background:#FF6B6B"></span><span class="dot" style="background:#FFC93D"></span><span class="dot" style="background:#58B368"></span>terminal</div><pre><span class="prompt">$</span> <span class="cmd">python3 -m niko2 run docs/beginners-examples/hello.niko</span>
+Hello, world!
+</pre></div>
 
   <h3>Ideas for your next programs</h3>
   <p>&#x1F3B2; A dice roller &mdash; <span class="kbd">ask number</span> how many dice, roll them with random numbers, add them up.<br>
