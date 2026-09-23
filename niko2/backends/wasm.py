@@ -1049,7 +1049,7 @@ class WasmCompiler:
         w.end()
         w.i32_const(self.text_val('error("'))
         w.local_get(0); w.i32_load(8)
-        w.i32_const(self.text_val('"'))
+        w.i32_const(self.text_val('")'))
         w.call(self.h["concat3"]); w.return_()
         w.end()
         # function -> function "name" (simple source name, like the VM)

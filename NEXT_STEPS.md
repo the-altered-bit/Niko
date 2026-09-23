@@ -616,3 +616,27 @@ match cases in `tests/test_formatter.py`.
   `tests/niko2_cases/` + `niko2/stdlib/`, Niko 1 spot checks). README
   gained an Alpha 35 section. Full suite green. See
   `RELEASE_NOTES_ALPHA35.md` / `ALPHA35_DESIGN.md`.
+- **Alpha 36 is complete**: `niko2 fuzz` — the differential fuzzer
+  (`niko2/fuzz.py`, new). Seeded grammar-aware generator + differential
+  runner (VM/WASM/native subprocesses, per-backend timeout, exact stdout
+  bytes) + greedy line-deletion minimizer + `--corpus` re-run mode +
+  expected-divergence allowlist; `--seed/--cases/--backend/--timeout/
+  --native-sample/--keep-passing/--no-minimize` flags; exit 0/1/2.
+  Termination by construction (pinned structurally by `tests/test_fuzz.py`,
+  8 tests: protected while-counters, iterated for-each lists, stop rule,
+  give-back type model, tiny fib/fact literals, no ask in loops/functions,
+  valid try_number inputs only). Final campaign: 5,000 cases VM vs WASM
+  (seeds 101–105) — 5,000/5,000 pass, 0 failures; 200-case native
+  characterization found nothing beyond the one known bug. Seven real
+  backend bugs documented in `niko2/KNOWN_LIMITATIONS.md` with minimal
+  repros — native `otherwise if` miscompile (invalid C + silent
+  wrong-branch variant), three-way `ask`-at-EOF divergence (incl. a
+  compiled-backend hang), `try_number` error-message divergence,
+  native `ask number` prompt skip, **`stop` leaking the VM's loop
+  iterator (genuine VM control-flow bug, flagged prominently)**,
+  bool-vs-number comparison divergence — all left for backend sprints.
+  Three generator bugs fixed along the way. One-line drive-by: WASM
+  `error("x")` rendering fixed to match VM. `fuzz_failures/`/`fuzz_work/`/
+  `fuzz_corpus/` gitignored (local scratch). README gained an Alpha 36
+  section. Full suite green (401 pytest). See
+  `RELEASE_NOTES_ALPHA36.md` / `ALPHA36_DESIGN.md`.

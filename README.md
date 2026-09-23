@@ -247,3 +247,35 @@ random/range call forms, bare `in`, `=`, hex, `//`, `say "a" "b"`,
 semantic — `if name:`, `use mylib`, global writes — is reported for a
 human to decide. The guide's §8 states the advisor-vs-transpiler
 contract. See `RELEASE_NOTES_ALPHA35.md` / `ALPHA35_DESIGN.md`.
+
+## Niko 2 Alpha 36 — `niko2 fuzz`, the differential fuzzer
+
+A seeded, grammar-aware program generator plus a differential runner:
+it generates random Niko programs, runs each on the VM, WASM, and
+native backends as subprocesses, and compares stdout bytes exactly.
+Any disagreement is shrunk (greedy line deletion) and saved to
+`fuzz_failures/` with a report. Termination is by construction —
+bounded while-loop counters, no `ask` inside loops/functions, small
+literals for exponential-time calls — so a hang is always a backend
+bug, never a generator artifact.
+
+```bash
+niko2 fuzz --seed 1 --cases 1000            # generate + compare (seed always printed)
+niko2 fuzz --backend vm,wasm                # subset of backends
+niko2 fuzz --native-sample 10               # native only on every 10th case (it's ~3s/compile)
+niko2 fuzz --corpus fuzz_failures           # re-run saved cases (regression set)
+```
+
+Exit 0 when every case agrees, 1 on divergences, 2 on usage errors.
+The final campaign (5,000 cases, VM vs WASM) was fully green; the
+bug-finding runs surfaced seven real backend bugs now in
+`niko2/KNOWN_LIMITATIONS.md`: the native backend miscompiles
+`otherwise if` with a temp-emitting condition (invalid C, plus a silent
+wrong-branch variant), `ask` past stdin EOF diverges three ways (VM
+errors, WASM/native yield `""` for text, both compiled backends hang on
+`ask number`), `error_message(try_number(bad-text))` differs VM-vs-WASM,
+native skips re-printing the prompt on `ask number` retry, `stop` out of
+`repeat`/`for each` leaks the VM's loop iterator, and comparing
+`yes`/`no` with numbers diverges across backends. None fixed this sprint;
+the fuzzer avoids each class by construction. See
+`RELEASE_NOTES_ALPHA36.md` / `ALPHA36_DESIGN.md`.

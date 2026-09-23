@@ -191,7 +191,7 @@ def cmd_migrate(file,fix=False,to_stdout=False):
 
 def main():
     ap=argparse.ArgumentParser(prog='niko2',description='Niko 2 compiler/interpreter')
-    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','fmt','deps','lock','get','publish','lsp','debug','wasm','native','repl','test','migrate'])
+    ap.add_argument('command',nargs='?',default='run',choices=['run','check','build','disasm','init','info','format','fmt','deps','lock','get','publish','lsp','debug','wasm','native','repl','test','migrate','fuzz'])
     ap.add_argument('file',nargs='?')
     ap.add_argument('--check',action='store_true',help='(fmt) do not write files; exit 1 if any input would be reformatted')
     ap.add_argument('--fix',action='store_true',help='(migrate) apply the mechanical fixes in place, then re-analyze')
@@ -203,6 +203,15 @@ def main():
     ap.add_argument('--emit-c',action='store_true',help='(native) also write the generated C source next to the output')
     ap.add_argument('--run',action='store_true',help='run the .wasm with node after building')
     ap.add_argument('--version',action='version',version=f'Niko {VERSION}')
+    # Alpha 36: `niko2 fuzz` — differential fuzzer (VM/WASM/native).
+    ap.add_argument('--seed',type=int,default=None,help='(fuzz) RNG seed (default: random; always printed)')
+    ap.add_argument('--cases',type=int,default=200,help='(fuzz) programs to generate (default 200)')
+    ap.add_argument('--backend',default='vm,wasm,native',help='(fuzz) comma-separated subset of vm,wasm,native')
+    ap.add_argument('--timeout',type=float,default=10,help='(fuzz) per-backend seconds before a hang is a failure')
+    ap.add_argument('--native-sample',type=int,default=1,help='(fuzz) run native only on every Nth case')
+    ap.add_argument('--keep-passing',action='store_true',help='(fuzz) save passing programs to fuzz_corpus/')
+    ap.add_argument('--no-minimize',action='store_true',help='(fuzz) skip the shrink pass on failures')
+    ap.add_argument('--corpus',default=None,help='(fuzz) re-run saved *.niko cases instead of generating')
     # Argparse quirk (pre-existing): with two nargs='?' positionals, an
     # option sitting between them breaks parsing, so `niko2 get --update
     # <name>` would die as "unrecognized arguments". Hoist --update out
@@ -268,6 +277,11 @@ def main():
     # Alpha 35: `niko2 migrate` -- Niko 1 -> Niko 2 migration advisor.
     if a.command=='migrate':
         return cmd_migrate(a.file,fix=(a.fix or migrate_fix),to_stdout=(a.stdout or migrate_stdout))
+    # Alpha 36: `niko2 fuzz` -- differential fuzzer (VM/WASM/native).
+    # Takes no file positional; options come after the command word, so the
+    # two-positional argparse quirk does not bite.
+    if a.command=='fuzz':
+        from .fuzz import main as fuzz_main; return fuzz_main(a)
     if a.command=='deps':
         root=find_project_root(a.file or '.')
         graph=collect_project_dependencies(root)

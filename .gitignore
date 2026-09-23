@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 editors/vscode/client/node_modules/
 .DS_Store
+# Alpha 36: niko2 fuzz scratch dirs (local campaign artifacts, never committed)
+fuzz_failures/
+fuzz_work/
+fuzz_corpus/

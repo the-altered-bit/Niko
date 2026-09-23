@@ -536,3 +536,235 @@ detected by `niko2 migrate`.
    flagged a possible VM/native split in how `result` values behave in
    boolean position, but this was not confirmed differentially -- it
    needs a dedicated probe before it can be documented as fact.
+
+## Native: `otherwise if` with a temp-emitting condition miscompiles (Alpha 36, 2026-09-23)
+
+Found by the `niko2 fuzz` differential campaign on its first real run
+(seed 20260923, case 10). Minimal repro:
+
+```
+if 1 is 1:
+    say 1
+otherwise if length([1, 2]) is 2:
+    say 2
+otherwise:
+    say 3
+```
+
+VM and WASM print `1`, rc=0. The native backend's C does not compile:
+
+```
+prog.c:19:5: error: 'else' without a previous 'if'
+   19 |     else if (nval_truthy(nval_binary(3, 6, b_length(3, t_2), nval_number(2)))) {
+```
+
+Root cause (`niko2/backends/native.py`, `IfStmt` in `gen_stmt`): the
+condition is compiled with `c = self.gen_expr(cond)`, and `gen_expr`
+emits temp-variable assignment *statements* as a side effect. Those
+statements land in the output stream between the previous branch's
+closing `}` and the `else if` line, which is invalid C (`else` must
+directly follow `}`). Any `otherwise if` whose condition needs temps
+fails this way (`has({...}, ...)`, `length([...]) is ...`, ...); plain
+conditions (`2 is 2`, `starts_with("ab", "a")` with constant args) work,
+and a leading `if` with a temp-emitting condition is fine -- only
+`otherwise if` breaks. Larger programs additionally show `undeclared`
+temp errors cascading from the broken brace structure.
+
+Worse, the campaign's native characterization (seed 201) showed the
+same root cause can produce *valid* C that silently takes the wrong
+branch. Minimal repro:
+
+```
+set c12 to 0
+while c12 is smaller than 1:
+    set c12 to c12 + 1
+    if not (no):
+        say "first"
+    otherwise if not (yes):
+        say "second"
+    otherwise if [607, 65, c12, c12] or "naïve café":
+        say nothing, length([c12, c12, 820, -673]) is smaller than number("3.5")
+    otherwise:
+        say "fourth"
+    say c12
+```
+
+VM/WASM print `first` / `1`; native prints `first` / `nothing no` / `1`.
+The `or` in the third condition is lowered to its own `if (!t) { t =
+rhs; }`, and the chain's `else if (t)` / `else` attach to *that* inner
+`if` instead of the outer chain -- so after the first branch runs, the
+third condition's temps still execute and its body runs too. This is
+the dangerous half of the bug: not a loud compile error but wrong
+control flow at runtime.
+
+Not fixed in Alpha 36 (beyond the drive-by budget; the correct fix
+nests each subsequent condition inside the previous `else { ... }`
+block so temps are emitted in a legal position and short-circuit
+evaluation is preserved). The fuzzer's committed smoke test
+(`tests/test_fuzz.py`) runs VM+WASM only until this is fixed; campaign
+runs include native and bucket these failures by signature.
+
+## `ask` past stdin EOF diverges across backends (Alpha 36, 2026-09-23)
+
+Found by the `niko2 fuzz` pilot (seed 1, case 6: an `ask number` inside a
+`for each` loop consumed more stdin lines than were provided). Minimal
+repro (stdin holds one line, `42`):
+
+```
+ask number "n? " into x
+ask number "m? " into y
+say x, y
+```
+
+| backend | text `ask` at EOF | `ask number` at EOF |
+|---|---|---|
+| VM | rc=1, `Niko error ...: EOF when reading a line` | rc=1, same error |
+| WASM | rc=0, yields `""` silently | **hangs**: prints `Please type a number.` forever |
+| native | rc=0, yields `""` silently | **hangs** (timeout) |
+
+So on exhausted stdin the VM raises a clean error, WASM/native
+silently produce an empty string for text asks, and both compiled
+backends spin forever on `ask number`. The WASM/native number-ask hang
+is the serious half: an unattended program waiting on a closed pipe
+never terminates. Not fixed in Alpha 36 (no language-semantics changes
+this sprint); the fuzzer avoids the whole class by construction --
+`ask` is never generated inside a loop or function body, so the runtime
+ask count can never exceed the canned stdin lines
+(`niko2/fuzz.py`, "Termination by construction").
+
+## `try_number` text-failure message differs on compiled backends (Alpha 36, 2026-09-23)
+
+Found by the `niko2 fuzz` differential campaign (seed 201, case 140:
+a `match` arm compared `error_message(try_number("xyz!"))` and the
+first output line differed VM-vs-WASM). Minimal repro:
+
+```
+match try_number("xyz!"):
+    when error m:
+        say m
+    otherwise:
+        say "not-error"
+```
+
+| backend | output |
+|---|---|
+| VM | `I can't turn 'xyz!' into a number.` |
+| WASM | `xyz!` |
+| native | `xyz!` |
+
+The VM is the reference: the WASM codegen comment
+(`niko2/backends/wasm.py`, `try_number`) explicitly says the intent is
+`"I can't turn '<s>' into a number." (exact VM message)`, but the
+text-parse-failure path emits `make_result(s, 0)` -- the raw input
+string as the error payload -- instead of building that message (the
+non-text path right below does build it, and agrees with the VM).
+The native runtime (`niko2/backends/niko_runtime.c`, `b_try_number`)
+then copied the buggy behavior deliberately
+(`return nval_error(x);  /* WASM parity: the text itself is the message */`),
+cementing the divergence from the VM. Only the text-failure path is
+affected: `try_number("3.5")` succeeds and `try_number([1, 2])` fails
+with `I can't turn [1, 2] into a number.` identically on all three.
+
+Not fixed in Alpha 36 (backend-sprint work: the WASM text branch needs
+the same `concat3` message construction the fallthrough branch uses,
+and the native runtime needs to match; the "WASM parity" comment goes
+away). The fuzzer avoids the shape by construction (`niko2/fuzz.py`
+generates `try_number` only with valid numeric inputs): the message
+stays observable through string operations on the bound error (e.g.
+seed 101 case 507 printed `replace(m, " ", "_")`), so no output
+normalization could allowlist every derived form. The runner's
+`EXPECTED_DIVERGENCES` still carries a `try-number-message` entry for
+the direct form, which fires on `--corpus` re-runs of saved cases.
+
+## Native: `ask number` doesn't re-print the prompt on reprompt (Alpha 36, 2026-09-23)
+
+Found by the `niko2 fuzz` differential campaign (seed 201, case 22).
+Minimal repro (stdin holds `gamma` then `7657`):
+
+```
+ask number "city? " into v8
+say "got", v8
+```
+
+| backend | output |
+|---|---|
+| VM | `city? Please type a number.` / `city? got 7657` |
+| WASM | `city? Please type a number.` / `city? got 7657` |
+| native | `city? Please type a number.` / `got 7657` |
+
+After a non-numeric line, the native backend prints `Please type a
+number.` but does not re-display the `city? ` prompt before reading
+the next line; the value is still read correctly (`7657`). VM and WASM
+re-print the prompt. Cosmetic-only (no wrong value, no hang), but it is
+a real stdout divergence the differential campaign flags. Not fixed in
+Alpha 36 (backend-sprint work, next to the `ask`-at-EOF entries above).
+
+## VM: `stop` out of `repeat`/`for each` leaks the loop iterator (Alpha 36, 2026-09-23)
+
+Found by the `niko2 fuzz` differential campaign (seed 777, case 2 --
+a vm-only hang; WASM and native agree and terminate). Minimal repro:
+
+```
+repeat 1 times:
+    for each it22 in [-573 % 3, -736]:
+        stop
+say "done"
+```
+
+VM hangs forever; WASM and native print `done`. Root cause
+(`niko2/compiler.py` + `niko2/vm.py`): `repeat` and `for each` drive
+iteration from a per-frame `iter_stack` (`ITER_REPEAT`/`ITER_PREP` push
+an iterator; the `..._NEXT` op pops it on exhaustion). `stop` compiles
+to a plain `JUMP` to the innermost loop's end address -- the iterator
+is never popped. The stale iterator then corrupts the next enclosing
+`repeat`/`for each` loop's `..._NEXT` op, which consumes from
+`iter_stack[-1]`: in the repro the outer `repeat`'s `REPEAT_NEXT`
+keeps finding the inner `for each`'s unexhausted iterator instead of
+its own, so the repeat never advances and the program loops forever
+(and leaks one iterator per cycle). With different shapes the same
+bug silently yields *wrong iteration values* instead of hanging --
+e.g. a `for each` inside a `while` inside a `for each` resumes the
+outer loop from the inner loop's leftover iterator.
+
+`skip` is unaffected (it jumps to the loop head, where the live
+iterator is correctly advanced). `stop` out of a `while` loop is
+unaffected (no iterator involved), as is `stop` out of a
+`repeat`/`for each` with no `for each`/`repeat` above it (the leaked
+iterator is never consumed).
+
+The correct fix is in the compiler/VM: record the loop kind on the
+compiler's `loop_stack` and, for `stop` inside a `repeat`/`for each`,
+emit an iterator-pop before the break jump (the normal-exhaustion
+paths already pop, so the pop belongs on the break path only). Not
+fixed in Alpha 36 (beyond the drive-by budget -- it changes VM loop
+machinery, not a one-liner). The fuzzer avoids the unsafe shapes by
+construction (`niko2/fuzz.py`, `_gen_loop_exit`: `stop` only where the
+innermost loop is a `while`, or where no `for each`/`repeat` encloses
+the stopped loop), pinned by `tests/test_fuzz.py`.
+
+## VM vs WASM/native: comparing `yes`/`no` with numbers (Alpha 36, 2026-09-23)
+
+Found by the `niko2 fuzz` differential campaign (seed 101, case 178).
+Minimal repro:
+
+```
+say min(-733, no)
+say no < 5
+```
+
+The VM prints `-733` / `yes`; WASM and native raise
+`I can't compare those values.` (rc=1). Root cause: the VM implements
+`min`/`max` as Python's `min`/`max` (`niko2/vm.py`) and its comparison
+ops inherit Python's `bool < int` ordering (`no`/`yes` behave as 0/1),
+while the WASM and native backends reject mixed bool/number operands
+in `<`, `>`, `<=`, `>=`, `==`, `!=` (and therefore in `min`/`max`,
+which compare). The typechecker accepts these programs, so this is a
+genuine semantic divergence, not a rejected program. Not fixed in
+Alpha 36 (deciding whether `yes`/`no` should order as 0/1 is a
+language-semantics question, out of sprint scope). The fuzzer no
+longer generates the shape: its expression generator never mixes
+bool with number operands, and a generator type-model bug that let a
+bool-returning call slip into an `int` slot (early `give back` in a
+function body used a random type instead of the function's return
+type) is fixed (`niko2/fuzz.py`, `self.func_ret`), pinned by
+`tests/test_fuzz.py`.
