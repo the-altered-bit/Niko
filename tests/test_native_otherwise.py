@@ -18,6 +18,8 @@ is on PATH.
 """
 import os, pathlib, shutil, subprocess, sys, tempfile
 
+import pytest
+
 root = pathlib.Path(__file__).resolve().parent.parent
 
 # (name, source, expected VM stdout)
@@ -193,7 +195,8 @@ def _strip_banner(out):
     return ''.join(lines)
 
 
-for name, src, want in CASES:
+@pytest.mark.parametrize('name,src,want', CASES, ids=[c[0] for c in CASES])
+def test_otherwise_if_3way(name, src, want):
     with tempfile.TemporaryDirectory() as t:
         tmp = pathlib.Path(t)
         (tmp / 't.niko').write_text(src, encoding='utf8')
@@ -209,8 +212,6 @@ for name, src, want in CASES:
             wasm_out = _strip_banner(r.stdout)
             assert wasm_out == vm_out, \
                 f'3-way[{name}] WASM != VM:\n{wasm_out!r}\n{vm_out!r}'
-        else:
-            print('SKIP 3-way WASM: node.js not on PATH')
         if cc:
             # --run asserts the C compiles (a compile failure is rc != 0).
             r = _niko2('native', 't.niko', '--run', cwd=tmp)
@@ -219,6 +220,3 @@ for name, src, want in CASES:
             native_out = _strip_banner(r.stdout)
             assert native_out == vm_out, \
                 f'3-way[{name}] native != VM:\n{native_out!r}\n{vm_out!r}'
-        else:
-            print('SKIP 3-way native: no C compiler on PATH')
-    print(f'ok: {name}')
